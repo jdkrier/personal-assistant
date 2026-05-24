@@ -9,24 +9,26 @@ from pathlib import Path
 import anthropic
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from dotenv import load_dotenv
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from icalendar import Calendar
 
-load_dotenv()
+BASE_DIR = Path(__file__).parent.resolve()
+
+# Env vars are injected by the LaunchAgent plist (EnvironmentVariables key).
+# For manual runs, export them in your shell first or copy .env to your session.
 
 CANVAS_ICAL_URL = os.environ["CANVAS_ICAL_URL"]
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 
-BRIEFING_FILE = Path("briefing.json")
-BRIEFING_TMP = Path("briefing.json.tmp")
-STATIC_DIR = Path("static")
-TOKEN_PATH = Path("token.json")
+BRIEFING_FILE = BASE_DIR / "briefing.json"
+BRIEFING_TMP  = BASE_DIR / "briefing.json.tmp"
+STATIC_DIR    = BASE_DIR / "static"
+TOKEN_PATH    = BASE_DIR / "token.json"
 
 
 def compute_urgency(days_until_due: float) -> float:
@@ -262,7 +264,9 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
 async def index():
-    return FileResponse("static/index.html")
+    # Read synchronously to avoid anyio EDEADLK under macOS LaunchAgent
+    html = (STATIC_DIR / "index.html").read_bytes()
+    return HTMLResponse(content=html)
 
 
 @app.get("/api/data")

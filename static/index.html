@@ -6,36 +6,34 @@
   <title>GOOSE</title>
   <style>
     :root {
-      --bg:       #06080c;
-      --surface:  #0a0e15;
-      --card:     #0d1219;
-      --border:   #18222e;
-      --cyan:     #00d4ff;
-      --cyan-dim: #006f88;
-      --cyan-glow:rgba(0,212,255,0.12);
-      --amber:    #ffaa00;
-      --amber-dim:#7a5000;
-      --red:      #ff3355;
-      --green:    #00ff99;
-      --text:     #9ab4cc;
-      --text-dim: #2e4456;
-      --text-hi:  #d4e8ff;
-      --mono:     'SF Mono','Fira Code','Courier New',monospace;
+      --bg:        #06080c;
+      --card:      #0d1219;
+      --border:    #18222e;
+      --cyan:      #00d4ff;
+      --cyan-dim:  #006f88;
+      --cyan-glow: rgba(0,212,255,0.12);
+      --amber:     #ffaa00;
+      --red:       #ff3355;
+      --green:     #00ff99;
+      --text:      #9ab4cc;
+      --text-dim:  #3a5568;
+      --text-hi:   #d4e8ff;
+      --mono:      'SF Mono','Fira Code','Courier New',monospace;
     }
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
 
     body {
       background: var(--bg);
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      min-height: 100vh;
       overflow-x: hidden;
     }
 
-    /* Background grid */
-    body::before {
-      content: '';
+    /* Background grid — moves with parallax via JS */
+    #grid-bg {
       position: fixed;
       inset: 0;
       background-image:
@@ -44,6 +42,7 @@
       background-size: 48px 48px;
       pointer-events: none;
       z-index: 0;
+      will-change: background-position;
     }
 
     /* Scanlines */
@@ -53,26 +52,25 @@
       inset: 0;
       background: repeating-linear-gradient(
         0deg, transparent, transparent 3px,
-        rgba(0,0,0,0.06) 3px, rgba(0,0,0,0.06) 4px
+        rgba(0,0,0,0.055) 3px, rgba(0,0,0,0.055) 4px
       );
       pointer-events: none;
       z-index: 9998;
     }
 
-    .wrap {
-      position: relative;
-      z-index: 1;
-      padding: 22px 32px 36px;
-    }
-
-    /* ── HEADER ── */
+    /* ── STICKY HEADER ── */
     header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding-bottom: 18px;
+      padding: 16px 40px;
+      background: rgba(6,8,12,0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border);
-      margin-bottom: 22px;
     }
 
     .logo-group { display: flex; align-items: center; gap: 14px; }
@@ -87,7 +85,7 @@
 
     .logo-text {
       font-family: var(--mono);
-      font-size: 22px;
+      font-size: 20px;
       font-weight: 700;
       letter-spacing: 0.28em;
       color: var(--cyan);
@@ -96,7 +94,7 @@
 
     .logo-sub {
       font-family: var(--mono);
-      font-size: 9px;
+      font-size: 11px;
       letter-spacing: 0.18em;
       color: var(--text-dim);
       text-transform: uppercase;
@@ -108,9 +106,9 @@
     .sys-status {
       display: flex; align-items: center; gap: 8px;
       font-family: var(--mono);
-      font-size: 10px;
-      letter-spacing: 0.12em;
-      color: var(--text-dim);
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      color: var(--text);
       text-transform: uppercase;
     }
 
@@ -121,12 +119,12 @@
       box-shadow: 0 0 8px var(--green);
       animation: breathe 2.4s ease-in-out infinite;
     }
-    .status-dot.warn   { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
-    .status-dot.error  { background: var(--red);   box-shadow: 0 0 8px var(--red); animation: none; }
+    .status-dot.warn  { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+    .status-dot.error { background: var(--red);   box-shadow: 0 0 8px var(--red); animation: none; }
 
     @keyframes breathe {
       0%,100% { opacity:1; box-shadow: 0 0 8px var(--green); }
-      50%      { opacity:.5; box-shadow: 0 0 3px var(--green); }
+      50%      { opacity:.4; box-shadow: 0 0 3px var(--green); }
     }
 
     .clock {
@@ -136,219 +134,362 @@
       letter-spacing: 0.1em;
     }
 
+    /* ── SCROLL SECTIONS ── */
+    .section {
+      position: relative;
+      z-index: 1;
+      padding: 80px 40px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .section + .section {
+      border-top: 1px solid var(--border);
+    }
+
+    /* ── REVEAL ANIMATIONS ── */
+    .reveal {
+      opacity: 0;
+      transform: translateY(48px);
+      transition: opacity 0.8s cubic-bezier(0.16,1,0.3,1),
+                  transform 0.8s cubic-bezier(0.16,1,0.3,1);
+    }
+    .reveal.from-left  { transform: translateX(-60px); }
+    .reveal.from-right { transform: translateX(60px); }
+    .reveal.from-below { transform: translateY(60px); }
+
+    .reveal.visible {
+      opacity: 1;
+      transform: translate(0);
+    }
+
+    /* stagger children */
+    .stagger > * { opacity:0; transform:translateY(24px); transition: opacity 0.6s cubic-bezier(0.16,1,0.3,1), transform 0.6s cubic-bezier(0.16,1,0.3,1); }
+    .stagger.visible > *:nth-child(1) { opacity:1; transform:none; transition-delay: 0.05s; }
+    .stagger.visible > *:nth-child(2) { opacity:1; transform:none; transition-delay: 0.15s; }
+    .stagger.visible > *:nth-child(3) { opacity:1; transform:none; transition-delay: 0.25s; }
+    .stagger.visible > *:nth-child(4) { opacity:1; transform:none; transition-delay: 0.35s; }
+    .stagger.visible > *:nth-child(5) { opacity:1; transform:none; transition-delay: 0.45s; }
+    .stagger.visible > *:nth-child(n+6) { opacity:1; transform:none; transition-delay: 0.55s; }
+
     /* ── PANEL ── */
     .panel {
       position: relative;
       background: var(--card);
       border: 1px solid var(--border);
-      padding: 20px 24px;
+      padding: 28px 32px;
     }
 
-    /* Corner brackets */
-    .panel::before { content:''; position:absolute; top:-1px;    left:-1px;  width:14px; height:14px; border-top:2px solid var(--cyan); border-left:2px solid var(--cyan); }
-    .panel::after  { content:''; position:absolute; bottom:-1px; right:-1px; width:14px; height:14px; border-bottom:2px solid var(--cyan); border-right:2px solid var(--cyan); }
-    .panel .c-tr   { position:absolute; top:-1px;    right:-1px; width:14px; height:14px; border-top:2px solid var(--cyan); border-right:2px solid var(--cyan); }
-    .panel .c-bl   { position:absolute; bottom:-1px; left:-1px;  width:14px; height:14px; border-bottom:2px solid var(--cyan); border-left:2px solid var(--cyan); }
+    .panel::before { content:''; position:absolute; top:-1px; left:-1px; width:16px; height:16px; border-top:2px solid var(--cyan); border-left:2px solid var(--cyan); }
+    .panel::after  { content:''; position:absolute; bottom:-1px; right:-1px; width:16px; height:16px; border-bottom:2px solid var(--cyan); border-right:2px solid var(--cyan); }
+    .panel .c-tr   { position:absolute; top:-1px; right:-1px; width:16px; height:16px; border-top:2px solid var(--cyan); border-right:2px solid var(--cyan); }
+    .panel .c-bl   { position:absolute; bottom:-1px; left:-1px; width:16px; height:16px; border-bottom:2px solid var(--cyan); border-left:2px solid var(--cyan); }
 
     .panel-label {
       font-family: var(--mono);
-      font-size: 9px;
-      letter-spacing: 0.22em;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.18em;
       text-transform: uppercase;
-      color: var(--cyan-dim);
-      margin-bottom: 16px;
+      color: var(--cyan);
+      margin-bottom: 20px;
       display: flex;
       align-items: center;
       gap: 10px;
     }
     .panel-label::after { content:''; flex:1; height:1px; background: var(--border); }
 
-    /* ── BRIEF ── */
-    .brief-panel { margin-bottom: 20px; }
+    /* ── HERO BRIEF ── */
+    .hero-eyebrow {
+      font-family: var(--mono);
+      font-size: 13px;
+      letter-spacing: 0.22em;
+      color: var(--cyan);
+      text-transform: uppercase;
+      margin-bottom: 28px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .hero-eyebrow::before { content:''; width:32px; height:1px; background:var(--cyan); }
 
     .brief-text {
-      font-size: 26px;
+      font-size: clamp(22px, 3vw, 36px);
       font-weight: 300;
       color: var(--text-hi);
-      line-height: 1.45;
-      letter-spacing: 0.01em;
-      margin-bottom: 20px;
+      line-height: 1.5;
+      max-width: 800px;
+      margin-bottom: 48px;
     }
 
-    .brief-readouts {
+    .readouts {
       display: flex;
-      gap: 40px;
-      padding-top: 16px;
+      gap: 48px;
+      padding-top: 24px;
       border-top: 1px solid var(--border);
     }
 
-    .readout { display: flex; flex-direction: column; gap: 5px; }
-    .readout-label { font-family: var(--mono); font-size: 8px; letter-spacing: 0.2em; color: var(--text-dim); text-transform: uppercase; }
-    .readout-value { font-family: var(--mono); font-size: 14px; color: var(--cyan); letter-spacing: 0.05em; }
+    .readout { display:flex; flex-direction:column; gap:6px; }
+    .readout-label { font-family:var(--mono); font-size:12px; letter-spacing:0.18em; color:var(--text); text-transform:uppercase; }
+    .readout-value { font-family:var(--mono); font-size:16px; color:var(--cyan); letter-spacing:0.05em; }
 
-    .loading-state {
-      padding: 44px 0;
-      text-align: center;
-    }
+    .loading-state { padding: 60px 0; }
     .loading-state p {
       font-family: var(--mono);
-      font-size: 13px;
+      font-size: 14px;
       color: var(--text-dim);
-      letter-spacing: 0.18em;
+      letter-spacing: 0.2em;
       text-transform: uppercase;
       animation: flicker 1.4s step-end infinite;
     }
-    @keyframes flicker { 0%,100%{opacity:1} 50%{opacity:.15} }
+    @keyframes flicker { 0%,100%{opacity:1} 50%{opacity:.12} }
 
     /* ── DATA GRID ── */
     .data-grid {
       display: grid;
       grid-template-columns: 1.3fr 1fr 1fr;
-      gap: 18px;
+      gap: 24px;
+      align-items: start;
     }
-    @media (max-width: 860px) { .data-grid { grid-template-columns: 1fr; } }
+    @media (max-width: 900px) { .data-grid { grid-template-columns: 1fr; } }
+
+    /* section eyebrow */
+    .section-eyebrow {
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.22em;
+      color: var(--cyan);
+      text-transform: uppercase;
+      margin-bottom: 32px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .section-eyebrow::before { content:''; width:32px; height:1px; background:var(--cyan-dim); }
 
     /* ── ASSIGNMENTS ── */
     .a-row {
       display: flex;
       align-items: flex-start;
-      gap: 12px;
-      padding: 11px 0;
+      gap: 14px;
+      padding: 13px 0;
       border-bottom: 1px solid var(--border);
     }
     .a-row:last-child { border-bottom: none; }
 
     .badge {
       font-family: var(--mono);
-      font-size: 8px;
-      letter-spacing: 0.1em;
+      font-size: 11px;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
-      padding: 3px 7px;
+      padding: 4px 10px;
       border: 1px solid;
-      min-width: 72px;
+      min-width: 84px;
       text-align: center;
       flex-shrink: 0;
-      margin-top: 1px;
+      margin-top: 2px;
     }
-    .b-crit { color:var(--red);   border-color:var(--red);   background:rgba(255,51,85,.07);  box-shadow:0 0 10px rgba(255,51,85,.15); animation: pulse-red 2s ease-in-out infinite; }
-    .b-high { color:var(--amber); border-color:var(--amber); background:rgba(255,170,0,.07); }
-    .b-elev { color:#cc7700;      border-color:#442200; }
-    .b-mod  { color:var(--cyan-dim); border-color:#0a2a33; }
-    .b-rout { color:var(--text-dim); border-color:var(--border); }
+    .b-crit { color:var(--red);    border-color:var(--red);   background:rgba(255,51,85,.07);  animation: pulse-red 2s ease-in-out infinite; }
+    .b-high { color:var(--amber);  border-color:var(--amber); background:rgba(255,170,0,.06); }
+    .b-elev { color:#ffaa44;         border-color:#664400; }
+    .b-mod  { color:#44aacc;         border-color:#0a3a4a; }
+    .b-rout { color:#6a8899;         border-color:var(--border); }
 
     @keyframes pulse-red {
-      0%,100% { box-shadow:0 0 10px rgba(255,51,85,.15); }
-      50%      { box-shadow:0 0 18px rgba(255,51,85,.35); }
+      0%,100% { box-shadow:0 0 8px rgba(255,51,85,.12); }
+      50%      { box-shadow:0 0 18px rgba(255,51,85,.4); }
     }
 
     .a-info { flex:1; min-width:0; }
-    .a-name { font-size:13px; color:var(--text); line-height:1.3; margin-bottom:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .a-due  { font-family:var(--mono); font-size:10px; color:var(--text-dim); letter-spacing:.06em; }
+    .a-name { font-size:14px; color:var(--text-hi); line-height:1.35; margin-bottom:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .a-due  { font-family:var(--mono); font-size:12px; color:var(--text-dim); letter-spacing:.06em; }
     .a-due.crit { color:var(--red); }
     .a-due.high { color:var(--amber); }
 
     /* ── SCHEDULE ── */
     .e-row {
-      display: flex;
-      gap: 14px;
-      padding: 9px 0;
+      display: flex; gap:16px; padding:11px 0;
       border-bottom: 1px solid var(--border);
       align-items: flex-start;
     }
     .e-row:last-child { border-bottom: none; }
-    .e-time { font-family:var(--mono); font-size:11px; color:var(--cyan-dim); min-width:48px; flex-shrink:0; padding-top:2px; letter-spacing:.06em; }
-    .e-title { font-size:13px; color:var(--text); line-height:1.3; }
+    .e-time  { font-family:var(--mono); font-size:12px; color:var(--cyan-dim); min-width:50px; flex-shrink:0; padding-top:1px; letter-spacing:.06em; }
+    .e-title { font-size:14px; color:var(--text-hi); line-height:1.3; }
 
     /* ── FREE BLOCKS ── */
     .b-row {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 10px 0;
-      border-bottom: 1px solid var(--border);
+      display: flex; align-items:center; gap:14px;
+      padding:12px 0; border-bottom:1px solid var(--border);
     }
-    .b-row:last-child { border-bottom: none; }
-    .b-time  { font-family:var(--mono); font-size:11px; color:var(--text); letter-spacing:.04em; min-width:120px; flex-shrink:0; }
+    .b-row:last-child { border-bottom:none; }
+    .b-time  { font-family:var(--mono); font-size:12px; color:var(--text); letter-spacing:.04em; min-width:130px; flex-shrink:0; }
     .b-track { flex:1; height:2px; background:var(--border); }
-    .b-fill  { height:100%; background:var(--cyan); box-shadow:0 0 6px var(--cyan); }
-    .b-hrs   { font-family:var(--mono); font-size:11px; color:var(--green); letter-spacing:.06em; min-width:28px; text-align:right; }
+    .b-fill  { height:100%; background:var(--cyan); box-shadow:0 0 8px var(--cyan); transition: width 1s cubic-bezier(0.16,1,0.3,1); }
+    .b-hrs   { font-family:var(--mono); font-size:12px; color:var(--green); letter-spacing:.06em; min-width:30px; text-align:right; }
 
     .empty {
       font-family: var(--mono);
-      font-size: 10px;
+      font-size: 11px;
       color: var(--text-dim);
       letter-spacing: .14em;
       text-transform: uppercase;
-      padding: 10px 0;
+      padding: 12px 0;
     }
 
     /* ── FOOTER ── */
-    .footer {
+    .site-footer {
+      position: relative;
+      z-index: 1;
       display: flex;
       justify-content: space-between;
-      margin-top: 20px;
-      padding-top: 14px;
+      padding: 20px 40px;
       border-top: 1px solid var(--border);
       font-family: var(--mono);
       font-size: 9px;
       color: var(--text-dim);
-      letter-spacing: .12em;
+      letter-spacing: .14em;
       text-transform: uppercase;
+    }
+
+    /* scroll hint */
+    .scroll-hint {
+      position: absolute;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-family: var(--mono);
+      font-size: 9px;
+      letter-spacing: 0.2em;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      animation: hint-fade 3s ease-in-out 2s forwards;
+    }
+    .scroll-hint::after {
+      content: '';
+      width: 1px;
+      height: 32px;
+      background: linear-gradient(to bottom, var(--text-dim), transparent);
+      animation: drop 1.6s ease-in-out infinite;
+    }
+    @keyframes drop {
+      0%   { transform: scaleY(0); transform-origin: top; }
+      50%  { transform: scaleY(1); transform-origin: top; }
+      51%  { transform: scaleY(1); transform-origin: bottom; }
+      100% { transform: scaleY(0); transform-origin: bottom; }
+    }
+    @keyframes hint-fade { to { opacity: 0; pointer-events: none; } }
+
+    #jets-canvas {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
     }
   </style>
 </head>
 <body>
-<div class="wrap">
 
-  <header>
-    <div class="logo-group">
-      <div class="diamond"></div>
-      <div>
-        <div class="logo-text">GOOSE</div>
-        <div class="logo-sub">Personal Co-Pilot · v1.0</div>
-      </div>
-    </div>
-    <div class="header-right">
-      <div class="sys-status">
-        <div class="status-dot" id="sys-dot"></div>
-        <span id="sys-label">Nominal</span>
-      </div>
-      <div class="clock" id="clock"></div>
-    </div>
-  </header>
+<div id="grid-bg"></div>
+<canvas id="jets-canvas"></canvas>
 
-  <div class="panel brief-panel" id="brief-panel">
-    <div class="c-tr"></div><div class="c-bl"></div>
-    <div id="brief"></div>
+<header>
+  <div class="logo-group">
+    <div class="diamond"></div>
+    <div>
+      <div class="logo-text">GOOSE</div>
+      <div class="logo-sub">Personal Co-Pilot · v1.0</div>
+    </div>
   </div>
+  <div class="header-right">
+    <div class="sys-status">
+      <div class="status-dot" id="sys-dot"></div>
+      <span id="sys-label">Nominal</span>
+    </div>
+    <div class="clock" id="clock"></div>
+  </div>
+</header>
 
+<!-- HERO: Mission Brief -->
+<section class="section" id="hero-section">
+  <div class="hero-eyebrow reveal">Mission Brief</div>
+  <div id="brief" class="reveal" style="transition-delay:0.1s"></div>
+  <div class="scroll-hint" id="scroll-hint">Scroll</div>
+</section>
+
+<!-- DATA: Assignments + Schedule + Free Blocks -->
+<section class="section" id="data-section">
+  <div class="section-eyebrow reveal">Daily Intelligence</div>
   <div class="data-grid">
-    <div class="panel"><div class="c-tr"></div><div class="c-bl"></div>
+    <div class="panel reveal from-left" style="transition-delay:0.05s">
+      <div class="c-tr"></div><div class="c-bl"></div>
       <div class="panel-label">Assignments</div>
-      <div id="assignments"></div>
+      <div id="assignments" class="stagger"></div>
     </div>
-    <div class="panel"><div class="c-tr"></div><div class="c-bl"></div>
+    <div class="panel reveal" style="transition-delay:0.2s">
+      <div class="c-tr"></div><div class="c-bl"></div>
       <div class="panel-label">Schedule</div>
-      <div id="events"></div>
+      <div id="events" class="stagger"></div>
     </div>
-    <div class="panel"><div class="c-tr"></div><div class="c-bl"></div>
+    <div class="panel reveal from-right" style="transition-delay:0.35s">
+      <div class="c-tr"></div><div class="c-bl"></div>
       <div class="panel-label">Free Blocks</div>
-      <div id="blocks"></div>
+      <div id="blocks" class="stagger"></div>
     </div>
   </div>
+</section>
 
-  <div class="footer">
-    <span>Local · ASU Canvas + Google Calendar</span>
-    <span id="last-update"></span>
-  </div>
+<footer class="site-footer">
+  <span>Local · ASU Canvas + Google Calendar</span>
+  <span id="last-update"></span>
+</footer>
 
-</div>
 <script>
   const $ = id => document.getElementById(id);
 
-  // Live clock
-  const DAYS  = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
-  const MONTHS= ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  // ── Parallax grid ──
+  window.addEventListener('scroll', () => {
+    const y = window.scrollY;
+    document.getElementById('grid-bg').style.backgroundPosition = `0 ${y * 0.3}px`;
+  }, { passive: true });
+
+  // ── Intersection Observer — pendulum: slide in on entry, slide out on exit ──
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        e.target.classList.add('visible');
+      } else {
+        e.target.classList.remove('visible');
+      }
+    });
+  }, { threshold: 0.12 });
+
+  document.querySelectorAll('.reveal, .stagger').forEach(el => io.observe(el));
+
+  // Trigger hero on load
+  window.addEventListener('load', () => {
+    setTimeout(() => {
+      document.querySelectorAll('#hero-section .reveal').forEach((el, i) => {
+        setTimeout(() => el.classList.add('visible'), i * 120);
+      });
+    }, 200);
+  });
+
+  // Hide scroll hint once user scrolls
+  window.addEventListener('scroll', () => {
+    const hint = $('scroll-hint');
+    if (hint && window.scrollY > 40) hint.style.opacity = '0';
+  }, { passive: true, once: true });
+
+  // ── Live clock ──
+  const DAYS   = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+  const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
   function tick() {
     const n = new Date();
     $('clock').textContent =
@@ -370,7 +511,7 @@
   }
 
   function dueStr(days) {
-    if (days < 0)  return `T${days}  OVERDUE`;
+    if (days < 0)   return `T${days}  OVERDUE`;
     if (days === 0) return 'T+0  DUE TODAY';
     if (days === 1) return 'T+1  TOMORROW';
     return `T+${days}  DAYS OUT`;
@@ -401,26 +542,20 @@
       return;
     }
 
-    if (data.status === 'error') {
-      dot.className = 'status-dot error';
-      lbl.textContent = 'System Error';
-    } else {
-      dot.className = 'status-dot';
-      lbl.textContent = 'Nominal';
-    }
+    dot.className = data.status === 'error' ? 'status-dot error' : 'status-dot';
+    lbl.textContent = data.status === 'error' ? 'System Error' : 'Nominal';
 
     // Brief
     const h = data.headline;
     if (h?.headline) {
       $('brief').innerHTML = `
-        <div class="panel-label">Mission Brief</div>
         <div class="brief-text">${esc(h.headline)}</div>
-        <div class="brief-readouts">
+        <div class="readouts">
           ${h.priority_task   ? `<div class="readout"><div class="readout-label">Priority Target</div><div class="readout-value">${esc(h.priority_task)}</div></div>` : ''}
           ${h.suggested_block ? `<div class="readout"><div class="readout-label">Suggested Window</div><div class="readout-value">${esc(h.suggested_block)}</div></div>` : ''}
         </div>`;
     } else {
-      $('brief').innerHTML = `<div class="panel-label">Mission Brief</div><div class="empty">No recommendation computed</div>`;
+      $('brief').innerHTML = `<div class="loading-state"><p>Computing recommendation_</p></div>`;
     }
 
     // Assignments
@@ -428,9 +563,9 @@
     $('assignments').innerHTML = asgn.length === 0
       ? `<div class="empty">No assignments on deck</div>`
       : asgn.map(a => {
-          const [lbl, cls] = badge(a.days_until_due);
+          const [bl, bc] = badge(a.days_until_due);
           return `<div class="a-row">
-            <div class="badge ${cls}">${lbl}</div>
+            <div class="badge ${bc}">${bl}</div>
             <div class="a-info">
               <div class="a-name">${esc(a.name)}</div>
               <div class="a-due ${dueClass(a.days_until_due)}">${dueStr(a.days_until_due)}</div>
@@ -460,7 +595,12 @@
             <div class="b-hrs">${b.hours}h</div>
           </div>`).join('');
 
-    // Footer timestamp
+    // Re-observe stagger containers after content update
+    document.querySelectorAll('.stagger').forEach(el => {
+      el.classList.remove('visible');
+      io.observe(el);
+    });
+
     if (data.generated_at) {
       const d = new Date(data.generated_at);
       $('last-update').textContent = `Last sync  ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
@@ -478,6 +618,222 @@
 
   poll();
   setInterval(poll, 60_000);
+
+  // ── JET ANIMATION ──────────────────────────────────────────────────────────
+  (function () {
+    const canvas = document.getElementById('jets-canvas');
+    const ctx = canvas.getContext('2d');
+    const DEG = Math.PI / 180;
+    const TRAIL_LIFE = 15000; // ms
+    const MAX_JETS   = 3;
+
+    function resize() {
+      canvas.width  = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    resize();
+    window.addEventListener('resize', resize, { passive: true });
+
+    // ── normalise angle to (-π, π] ──
+    function normAngle(a) {
+      a = a % (Math.PI * 2);
+      if (a >  Math.PI) a -= Math.PI * 2;
+      if (a < -Math.PI) a += Math.PI * 2;
+      return a;
+    }
+
+    // ── draw the jet silhouette centred at origin, pointing right ──
+    function drawJetShape(ctx) {
+      // fuselage
+      ctx.beginPath();
+      ctx.moveTo( 11,  0);
+      ctx.lineTo(  2, -1.5);
+      ctx.lineTo( -5, -2);
+      ctx.lineTo( -9,  0);
+      ctx.lineTo( -5,  2);
+      ctx.lineTo(  2,  1.5);
+      ctx.closePath();
+      ctx.fill();
+      // left wing
+      ctx.beginPath();
+      ctx.moveTo(  1, -1.5);
+      ctx.lineTo( -2, -10);
+      ctx.lineTo( -6, -10);
+      ctx.lineTo( -5, -2);
+      ctx.closePath();
+      ctx.fill();
+      // right wing
+      ctx.beginPath();
+      ctx.moveTo(  1,  1.5);
+      ctx.lineTo( -2,  10);
+      ctx.lineTo( -6,  10);
+      ctx.lineTo( -5,  2);
+      ctx.closePath();
+      ctx.fill();
+      // upper tail fin
+      ctx.beginPath();
+      ctx.moveTo(-5, -1.5);
+      ctx.lineTo(-8.5, -5);
+      ctx.lineTo(-9,  0);
+      ctx.closePath();
+      ctx.fill();
+      // lower tail fin
+      ctx.beginPath();
+      ctx.moveTo(-5,  1.5);
+      ctx.lineTo(-8.5,  5);
+      ctx.lineTo(-9,  0);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // ── Jet class ──
+    class Jet {
+      constructor(now) {
+        const W = canvas.width, H = canvas.height;
+        const edge = Math.floor(Math.random() * 4);
+        const m = 40; // spawn margin off screen
+
+        if (edge === 0) {       // left → right
+          this.x = -m; this.y = H * (0.15 + Math.random() * 0.7);
+          this.heading = normAngle((-25 + Math.random() * 50) * DEG);
+        } else if (edge === 1) { // right → left
+          this.x = W + m; this.y = H * (0.15 + Math.random() * 0.7);
+          this.heading = normAngle((180 + (-25 + Math.random() * 50)) * DEG);
+        } else if (edge === 2) { // top → bottom
+          this.x = W * (0.15 + Math.random() * 0.7); this.y = -m;
+          this.heading = normAngle((90 + (-25 + Math.random() * 50)) * DEG);
+        } else {                  // bottom → top
+          this.x = W * (0.15 + Math.random() * 0.7); this.y = H + m;
+          this.heading = normAngle((-90 + (-25 + Math.random() * 50)) * DEG);
+        }
+
+        this.speed        = 110 + Math.random() * 110;  // px / sec
+        this.targetHeading = this.heading;
+        this.maxTurnRate  = (45 + Math.random() * 55) * DEG; // rad / sec
+
+        this.trail        = [];        // { x, y, t }
+        this.sampleTimer  = 0;
+        this.nextTurnAt   = now + (2 + Math.random() * 4) * 1000;
+        this.offscreenMs  = 0;
+        this.alive        = true;
+      }
+
+      update(dt, now) {
+        // ── smoothly bank toward target heading ──
+        const diff    = normAngle(this.targetHeading - this.heading);
+        const maxStep = this.maxTurnRate * dt;
+        this.heading += Math.abs(diff) <= maxStep
+          ? diff
+          : Math.sign(diff) * maxStep;
+
+        // ── move ──
+        this.x += Math.cos(this.heading) * this.speed * dt;
+        this.y += Math.sin(this.heading) * this.speed * dt;
+
+        // ── sample trail at ~30 pts / sec ──
+        this.sampleTimer += dt;
+        if (this.sampleTimer >= 1 / 30) {
+          this.trail.push({ x: this.x, y: this.y, t: now });
+          this.sampleTimer = 0;
+        }
+
+        // ── prune expired trail points ──
+        const cutoff = now - TRAIL_LIFE;
+        while (this.trail.length && this.trail[0].t < cutoff) this.trail.shift();
+
+        // ── pick a new heading occasionally ──
+        if (now >= this.nextTurnAt) {
+          // realistic max bank: ±65° from current heading per manoeuvre
+          this.targetHeading = normAngle(this.heading + (Math.random() - 0.5) * 130 * DEG);
+          this.nextTurnAt    = now + (1.5 + Math.random() * 4.5) * 1000;
+        }
+
+        // ── off-screen tracking ──
+        const W = canvas.width, H = canvas.height;
+        const pad = 120;
+        if (this.x < -pad || this.x > W + pad || this.y < -pad || this.y > H + pad) {
+          this.offscreenMs += dt * 1000;
+          if (this.offscreenMs > TRAIL_LIFE + 1000) this.alive = false;
+        } else {
+          this.offscreenMs = 0;
+        }
+      }
+
+      draw(ctx, now) {
+        if (this.trail.length < 2) return;
+
+        // ── smoke trail drawn in chunks so we can vary opacity per segment ──
+        const CHUNK = 10;
+        for (let i = 0; i < this.trail.length - 1; i += CHUNK) {
+          const end  = Math.min(i + CHUNK, this.trail.length - 1);
+          const midT = this.trail[Math.floor((i + end) / 2)].t;
+          const age  = Math.min(1, (now - midT) / TRAIL_LIFE);
+          const op   = (1 - age) * 0.28;
+          if (op < 0.005) continue;
+
+          ctx.beginPath();
+          ctx.moveTo(this.trail[i].x, this.trail[i].y);
+          for (let j = i + 1; j <= end; j++) ctx.lineTo(this.trail[j].x, this.trail[j].y);
+
+          ctx.strokeStyle = `rgba(190,230,255,${op.toFixed(3)})`;
+          ctx.lineWidth   = Math.max(0.4, (1 - age) * 2);
+          ctx.lineCap     = 'round';
+          ctx.lineJoin    = 'round';
+          ctx.stroke();
+        }
+
+        // ── jet body (only near viewport) ──
+        const W = canvas.width, H = canvas.height;
+        if (this.x > -60 && this.x < W + 60 && this.y > -60 && this.y < H + 60) {
+          ctx.save();
+          ctx.translate(this.x, this.y);
+          ctx.rotate(this.heading);
+          ctx.fillStyle  = 'rgba(160,225,255,0.78)';
+          ctx.shadowColor = 'rgba(0,212,255,0.9)';
+          ctx.shadowBlur  = 7;
+          drawJetShape(ctx);
+          ctx.restore();
+        }
+      }
+    }
+
+    // ── main loop ──
+    const jets = [];
+    let last    = performance.now();
+
+    // spawn first jet quickly so user sees it right away
+    let nextSpawn = performance.now() + (3 + Math.random() * 4) * 1000;
+
+    function loop(now) {
+      const dt = Math.min((now - last) / 1000, 0.1);
+      last = now;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // spawn
+      const alive = jets.filter(j => j.alive).length;
+      if (now >= nextSpawn && alive < MAX_JETS) {
+        jets.push(new Jet(now));
+        nextSpawn = now + (18 + Math.random() * 22) * 1000;
+      }
+
+      // cull dead jets
+      for (let i = jets.length - 1; i >= 0; i--) {
+        if (!jets[i].alive) jets.splice(i, 1);
+      }
+
+      // update + draw
+      for (const jet of jets) {
+        jet.update(dt, now);
+        jet.draw(ctx, now);
+      }
+
+      requestAnimationFrame(loop);
+    }
+
+    requestAnimationFrame(loop);
+  })();
+  // ── END JET ANIMATION ──────────────────────────────────────────────────────
 </script>
 </body>
 </html>
