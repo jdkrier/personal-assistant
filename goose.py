@@ -239,20 +239,48 @@ def fetch_and_write_briefing() -> None:
 
 # index.html is cached in memory.  Under macOS LaunchAgent context the
 # com.apple.provenance xattr on editor-written files can cause Python's
-# buffered IO to raise EDEADLK; raw os.open/os.read bypasses that layer.
-def _read_raw(path: Path) -> bytes:
-    fd = os.open(str(path), os.O_RDONLY)
+# buffered IO to raise EDEADLK.  We try multiple reading strategies and
+# log which one (if any) succeeds so we can diagnose failures.
+import logging as _logging
+_log = _logging.getLogger(__name__)
+
+
+def _read_html_file(path: Path) -> bytes:
+    """Try every available I/O method to read a provenance-tagged file."""
+    p = str(path)
+
+    # Strategy 1: raw os.open + os.read (bypasses buffered IO)
     try:
-        return os.read(fd, os.fstat(fd).st_size)
-    finally:
-        os.close(fd)
+        fd = os.open(p, os.O_RDONLY)
+        try:
+            data = os.read(fd, os.fstat(fd).st_size)
+            _log.info("_read_html: strategy 1 (os.read) succeeded")
+            return data
+        finally:
+            os.close(fd)
+    except OSError as e:
+        _log.warning("_read_html: strategy 1 failed: %s", e)
+
+    # Strategy 2: subprocess cat (different process, may have different perms)
+    import subprocess
+    try:
+        result = subprocess.run(["/bin/cat", p], capture_output=True, timeout=5)
+        if result.returncode == 0 and result.stdout:
+            _log.info("_read_html: strategy 2 (cat) succeeded")
+            return result.stdout
+        _log.warning("_read_html: strategy 2 failed: rc=%s stderr=%s",
+                     result.returncode, result.stderr[:200])
+    except Exception as e:
+        _log.warning("_read_html: strategy 2 failed: %s", e)
+
+    raise OSError(f"All read strategies failed for {path}")
 
 
 _HTML_CACHE: bytes = b""
 try:
-    _HTML_CACHE = _read_raw(STATIC_DIR / "index.html")
-except OSError:
-    pass  # will retry on first request
+    _HTML_CACHE = _read_html_file(STATIC_DIR / "index.html")
+except OSError as e:
+    _log.error("_read_html startup load failed: %s — will retry on first request", e)
 
 
 @asynccontextmanager
@@ -285,7 +313,7 @@ async def index():
     global _HTML_CACHE
     if not _HTML_CACHE:
         try:
-            _HTML_CACHE = _read_raw(STATIC_DIR / "index.html")
+            _HTML_CACHE = _read_html_file(STATIC_DIR / "index.html")
         except OSError:
             return HTMLResponse(
                 content=b"<html><body style='background:#06080c;color:#00d4ff;"
