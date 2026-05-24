@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Goose</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0d0d14;
+      color: #e2e2f0;
+      min-height: 100vh;
+      padding: 32px;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 28px;
+    }
+
+    .logo {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      color: #5b8fff;
+      text-transform: uppercase;
+    }
+
+    .date {
+      font-size: 14px;
+      color: #6060a0;
+    }
+
+    .headline-card {
+      background: #141420;
+      border: 1px solid #252535;
+      border-left: 4px solid #5b8fff;
+      border-radius: 10px;
+      padding: 24px 28px;
+      margin-bottom: 28px;
+    }
+
+    .headline-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      color: #5b8fff;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    .headline-text {
+      font-size: 22px;
+      font-weight: 500;
+      line-height: 1.4;
+      color: #e8e8f8;
+    }
+
+    .headline-meta {
+      margin-top: 12px;
+      font-size: 13px;
+      color: #6060a0;
+    }
+
+    .loading-card {
+      background: #141420;
+      border: 1px solid #252535;
+      border-radius: 10px;
+      padding: 48px;
+      text-align: center;
+      margin-bottom: 28px;
+    }
+
+    .loading-card p {
+      font-size: 18px;
+      color: #6060a0;
+      margin-bottom: 8px;
+    }
+
+    .loading-card small {
+      font-size: 13px;
+      color: #404060;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    @media (max-width: 700px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: #141420;
+      border: 1px solid #252535;
+      border-radius: 10px;
+      padding: 20px 24px;
+    }
+
+    .card-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      color: #6060a0;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+    }
+
+    .assignment {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid #1e1e2e;
+    }
+
+    .assignment:last-child { border-bottom: none; }
+
+    .urgency-bar {
+      width: 3px;
+      min-height: 36px;
+      border-radius: 2px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .urgency-critical { background: #ff4444; }
+    .urgency-high     { background: #ff8c00; }
+    .urgency-medium   { background: #ffd700; }
+    .urgency-low      { background: #44bb66; }
+    .urgency-distant  { background: #404060; }
+
+    .assignment-name {
+      font-size: 14px;
+      font-weight: 500;
+      color: #d8d8f0;
+      line-height: 1.3;
+    }
+
+    .assignment-due {
+      font-size: 12px;
+      color: #6060a0;
+      margin-top: 3px;
+    }
+
+    .due-critical { color: #ff6666; }
+    .due-high     { color: #ffaa44; }
+
+    .event {
+      display: flex;
+      gap: 12px;
+      padding: 8px 0;
+      border-bottom: 1px solid #1e1e2e;
+      align-items: flex-start;
+    }
+
+    .event:last-child { border-bottom: none; }
+
+    .event-time {
+      font-size: 12px;
+      color: #6060a0;
+      min-width: 70px;
+      padding-top: 2px;
+      flex-shrink: 0;
+    }
+
+    .event-title {
+      font-size: 14px;
+      color: #d8d8f0;
+    }
+
+    .free-block {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      background: #0f0f1a;
+      border: 1px solid #1e1e2e;
+      border-radius: 6px;
+      margin-bottom: 8px;
+    }
+
+    .free-block:last-child { margin-bottom: 0; }
+
+    .free-block-time {
+      font-size: 13px;
+      color: #a0a0c8;
+    }
+
+    .free-block-hours {
+      font-size: 12px;
+      color: #44bb66;
+      font-weight: 600;
+    }
+
+    .empty {
+      font-size: 13px;
+      color: #404060;
+      padding: 8px 0;
+    }
+
+    .error-banner {
+      background: #2a0f0f;
+      border: 1px solid #5a1515;
+      border-radius: 8px;
+      padding: 14px 20px;
+      margin-bottom: 20px;
+      font-size: 13px;
+      color: #ff8888;
+    }
+
+    .refresh-indicator {
+      position: fixed;
+      bottom: 20px;
+      right: 24px;
+      font-size: 11px;
+      color: #303050;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Goose</div>
+  <div class="date" id="date"></div>
+</header>
+
+<div id="error-banner" class="error-banner" style="display:none"></div>
+<div id="headline-section"></div>
+<div class="grid">
+  <div class="card">
+    <div class="card-label">Assignments</div>
+    <div id="assignments"></div>
+  </div>
+  <div>
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-label">Today's Schedule</div>
+      <div id="events"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Free Blocks</div>
+      <div id="free-blocks"></div>
+    </div>
+  </div>
+</div>
+
+<div class="refresh-indicator" id="refresh-indicator"></div>
+
+<script>
+  const $ = id => document.getElementById(id);
+
+  function formatDate() {
+    return new Date().toLocaleDateString("en-US", {
+      weekday: "long", month: "long", day: "numeric", year: "numeric"
+    });
+  }
+
+  function urgencyClass(days) {
+    if (days <= 0) return "urgency-critical";
+    if (days <= 1) return "urgency-critical";
+    if (days <= 3) return "urgency-high";
+    if (days <= 7) return "urgency-medium";
+    if (days <= 14) return "urgency-low";
+    return "urgency-distant";
+  }
+
+  function dueLabel(days) {
+    if (days < 0) return "Overdue";
+    if (days === 0) return "Due today";
+    if (days === 1) return "Due tomorrow";
+    return `Due in ${days} days`;
+  }
+
+  function dueClass(days) {
+    if (days <= 0) return "due-critical";
+    if (days <= 1) return "due-high";
+    return "";
+  }
+
+  function fmtTime(iso) {
+    if (!iso || !iso.includes("T")) return iso || "";
+    try {
+      return new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    } catch { return iso; }
+  }
+
+  function render(data) {
+    $("error-banner").style.display = "none";
+
+    if (data.status === "loading") {
+      $("headline-section").innerHTML = `
+        <div class="loading-card">
+          <p>Goose is waking up...</p>
+          <small>Pulling your assignments and schedule — usually takes 15–30 seconds.</small>
+        </div>`;
+      $("assignments").innerHTML = "";
+      $("events").innerHTML = "";
+      $("free-blocks").innerHTML = "";
+      return;
+    }
+
+    if (data.status === "error") {
+      $("error-banner").textContent = `Error: ${data.error}`;
+      $("error-banner").style.display = "block";
+    }
+
+    // Headline
+    const h = data.headline;
+    if (h && h.headline) {
+      $("headline-section").innerHTML = `
+        <div class="headline-card">
+          <div class="headline-label">Today's Recommendation</div>
+          <div class="headline-text">${escHtml(h.headline)}</div>
+          ${h.suggested_block ? `<div class="headline-meta">Suggested block: ${escHtml(h.suggested_block)}</div>` : ""}
+        </div>`;
+    } else {
+      $("headline-section").innerHTML = "";
+    }
+
+    // Assignments
+    const assignments = data.assignments || [];
+    if (assignments.length === 0) {
+      $("assignments").innerHTML = `<div class="empty">No upcoming assignments.</div>`;
+    } else {
+      $("assignments").innerHTML = assignments.map(a => `
+        <div class="assignment">
+          <div class="urgency-bar ${urgencyClass(a.days_until_due)}"></div>
+          <div>
+            <div class="assignment-name">${escHtml(a.name)}</div>
+            <div class="assignment-due ${dueClass(a.days_until_due)}">${dueLabel(a.days_until_due)}</div>
+          </div>
+        </div>`).join("");
+    }
+
+    // Events
+    const events = data.events || [];
+    if (events.length === 0) {
+      $("events").innerHTML = `<div class="empty">No events today.</div>`;
+    } else {
+      $("events").innerHTML = events.map(e => `
+        <div class="event">
+          <div class="event-time">${fmtTime(e.start)}</div>
+          <div class="event-title">${escHtml(e.title)}</div>
+        </div>`).join("");
+    }
+
+    // Free blocks
+    const blocks = data.free_blocks || [];
+    if (blocks.length === 0) {
+      $("free-blocks").innerHTML = `<div class="empty">No free blocks today.</div>`;
+    } else {
+      $("free-blocks").innerHTML = blocks.map(b => `
+        <div class="free-block">
+          <div class="free-block-time">${escHtml(b.start)} – ${escHtml(b.end)}</div>
+          <div class="free-block-hours">${b.hours}h free</div>
+        </div>`).join("");
+    }
+  }
+
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  async function poll() {
+    try {
+      const res = await fetch("/api/data");
+      const data = await res.json();
+      render(data);
+      const gen = data.generated_at
+        ? new Date(data.generated_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+        : null;
+      $("refresh-indicator").textContent = gen ? `Updated ${gen}` : "";
+    } catch {
+      $("refresh-indicator").textContent = "Reconnecting...";
+    }
+  }
+
+  $("date").textContent = formatDate();
+  poll();
+  setInterval(poll, 60_000);
+</script>
+</body>
+</html>
