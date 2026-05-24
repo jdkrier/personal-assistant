@@ -695,36 +695,48 @@
 
         if (edge === 0) {       // left → right
           this.x = -m; this.y = H * (0.15 + Math.random() * 0.7);
-          this.heading = normAngle((-25 + Math.random() * 50) * DEG);
+          this.heading = normAngle((-20 + Math.random() * 40) * DEG);
         } else if (edge === 1) { // right → left
           this.x = W + m; this.y = H * (0.15 + Math.random() * 0.7);
-          this.heading = normAngle((180 + (-25 + Math.random() * 50)) * DEG);
+          this.heading = normAngle((180 + (-20 + Math.random() * 40)) * DEG);
         } else if (edge === 2) { // top → bottom
           this.x = W * (0.15 + Math.random() * 0.7); this.y = -m;
-          this.heading = normAngle((90 + (-25 + Math.random() * 50)) * DEG);
+          this.heading = normAngle((90 + (-20 + Math.random() * 40)) * DEG);
         } else {                  // bottom → top
           this.x = W * (0.15 + Math.random() * 0.7); this.y = H + m;
-          this.heading = normAngle((-90 + (-25 + Math.random() * 50)) * DEG);
+          this.heading = normAngle((-90 + (-20 + Math.random() * 40)) * DEG);
         }
 
-        this.speed        = 110 + Math.random() * 110;  // px / sec
-        this.targetHeading = this.heading;
-        this.maxTurnRate  = (45 + Math.random() * 55) * DEG; // rad / sec
+        this.speed       = 110 + Math.random() * 110; // px / sec
+        // max sustained turn rate: 14–28 deg/sec → sweeping arcs, not tight circles
+        this.maxTurnRate = (14 + Math.random() * 14) * DEG;
+        // continuous angular velocity — starts with a gentle random bank
+        this.turnRate    = (Math.random() - 0.5) * this.maxTurnRate;
+        // target turn rate drifts slowly via random walk
+        this.turnTarget  = (Math.random() - 0.5) * this.maxTurnRate * 2;
+        this.nextDrift   = now + (0.8 + Math.random() * 1.8) * 1000;
 
-        this.trail        = [];        // { x, y, t }
-        this.sampleTimer  = 0;
-        this.nextTurnAt   = now + (2 + Math.random() * 4) * 1000;
-        this.offscreenMs  = 0;
-        this.alive        = true;
+        this.trail       = []; // { x, y, t }
+        this.sampleTimer = 0;
+        this.offscreenMs = 0;
+        this.alive       = true;
       }
 
       update(dt, now) {
-        // ── smoothly bank toward target heading ──
-        const diff    = normAngle(this.targetHeading - this.heading);
-        const maxStep = this.maxTurnRate * dt;
-        this.heading += Math.abs(diff) <= maxStep
-          ? diff
-          : Math.sign(diff) * maxStep;
+        // ── continuously drift turnRate toward turnTarget ──
+        const diff = this.turnTarget - this.turnRate;
+        // approach at ~2× maxTurnRate per second so changes feel fluid
+        const step = this.maxTurnRate * 2 * dt;
+        this.turnRate += Math.abs(diff) < step ? diff : Math.sign(diff) * step;
+
+        // ── pick a new turnTarget every 0.8–2.6s for organic variation ──
+        if (now >= this.nextDrift) {
+          this.turnTarget = (Math.random() - 0.5) * this.maxTurnRate * 2;
+          this.nextDrift  = now + (0.8 + Math.random() * 1.8) * 1000;
+        }
+
+        // ── apply continuous banking to heading ──
+        this.heading = normAngle(this.heading + this.turnRate * dt);
 
         // ── move ──
         this.x += Math.cos(this.heading) * this.speed * dt;
@@ -741,13 +753,6 @@
         const cutoff = now - TRAIL_LIFE;
         while (this.trail.length && this.trail[0].t < cutoff) this.trail.shift();
 
-        // ── pick a new heading occasionally ──
-        if (now >= this.nextTurnAt) {
-          // realistic max bank: ±65° from current heading per manoeuvre
-          this.targetHeading = normAngle(this.heading + (Math.random() - 0.5) * 130 * DEG);
-          this.nextTurnAt    = now + (1.5 + Math.random() * 4.5) * 1000;
-        }
-
         // ── off-screen tracking ──
         const W = canvas.width, H = canvas.height;
         const pad = 120;
@@ -760,37 +765,30 @@
       }
 
       draw(ctx, now) {
-        if (this.trail.length < 2) return;
-
-        // ── smoke trail drawn in chunks so we can vary opacity per segment ──
-        const CHUNK = 10;
-        for (let i = 0; i < this.trail.length - 1; i += CHUNK) {
-          const end  = Math.min(i + CHUNK, this.trail.length - 1);
-          const midT = this.trail[Math.floor((i + end) / 2)].t;
-          const age  = Math.min(1, (now - midT) / TRAIL_LIFE);
-          const op   = (1 - age) * 0.28;
-          if (op < 0.005) continue;
-
+        // ── smoke trail: expanding semi-transparent puffs that grow as they age ──
+        for (let i = 0; i < this.trail.length; i += 2) {
+          const pt  = this.trail[i];
+          const age = Math.min(1, (now - pt.t) / TRAIL_LIFE);
+          // quadratic fade so the tail near the jet is denser
+          const op  = (1 - age) * (1 - age) * 0.22;
+          if (op < 0.004) continue;
+          // puffs start tight (1.5 px) and expand to ~16 px as they disperse
+          const r   = 1.5 + age * 14.5;
           ctx.beginPath();
-          ctx.moveTo(this.trail[i].x, this.trail[i].y);
-          for (let j = i + 1; j <= end; j++) ctx.lineTo(this.trail[j].x, this.trail[j].y);
-
-          ctx.strokeStyle = `rgba(190,230,255,${op.toFixed(3)})`;
-          ctx.lineWidth   = Math.max(0.4, (1 - age) * 2);
-          ctx.lineCap     = 'round';
-          ctx.lineJoin    = 'round';
-          ctx.stroke();
+          ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(210,215,220,${op.toFixed(3)})`;
+          ctx.fill();
         }
 
-        // ── jet body (only near viewport) ──
+        // ── jet body (only near viewport) — F-14 Tomcat grey ──
         const W = canvas.width, H = canvas.height;
         if (this.x > -60 && this.x < W + 60 && this.y > -60 && this.y < H + 60) {
           ctx.save();
           ctx.translate(this.x, this.y);
           ctx.rotate(this.heading);
-          ctx.fillStyle  = 'rgba(160,225,255,0.78)';
-          ctx.shadowColor = 'rgba(0,212,255,0.9)';
-          ctx.shadowBlur  = 7;
+          ctx.fillStyle   = '#9aa4ac';
+          ctx.shadowColor = 'rgba(180,190,200,0.45)';
+          ctx.shadowBlur  = 5;
           drawJetShape(ctx);
           ctx.restore();
         }
