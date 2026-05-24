@@ -66,7 +66,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 16px 40px;
+      padding: 12px 40px;
       background: rgba(6,8,12,0.85);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
@@ -386,40 +386,39 @@
     }
     @keyframes hint-fade { to { opacity: 0; pointer-events: none; } }
 
-    /* ── WEATHER BAR ─────────────────────────────────────────────────────── */
+    /* ── WEATHER BAR (header-pinned) ─────────────────────────────────────── */
     #atmos-bar {
       display: flex;
-      flex-wrap: wrap;
+      align-items: center;
       gap: 0;
-      margin-top: 28px;
-      border: 1px solid rgba(0,212,255,0.18);
-      background: rgba(0,212,255,0.03);
-      width: fit-content;
-      max-width: 100%;
     }
     .atmos-cell {
       display: flex;
       flex-direction: column;
-      gap: 4px;
-      padding: 10px 18px;
+      gap: 2px;
+      padding: 4px 14px;
       border-right: 1px solid rgba(0,212,255,0.12);
     }
     .atmos-cell:last-child { border-right: none; }
     .atmos-lbl {
       font-family: var(--mono);
-      font-size: 9px;
-      letter-spacing: 0.2em;
+      font-size: 8px;
+      letter-spacing: 0.18em;
       color: var(--text-dim);
       text-transform: uppercase;
     }
     .atmos-val {
       font-family: var(--mono);
-      font-size: 15px;
+      font-size: 12px;
       color: var(--cyan);
-      letter-spacing: 0.06em;
+      letter-spacing: 0.05em;
       white-space: nowrap;
     }
-    .atmos-val.dim { color: var(--text); font-size: 13px; }
+    .atmos-val.dim { color: var(--text); }
+    /* hide sunrise/sunset on narrow viewports to keep header tidy */
+    @media (max-width: 1100px) { .atmos-sun { display: none; } }
+    @media (max-width: 900px)  { .atmos-cell { padding: 4px 9px; } }
+    @media (max-width: 720px)  { #atmos-bar { display: none; } }
 
     #jets-canvas {
       position: fixed;
@@ -617,6 +616,7 @@
       <div class="logo-sub">Personal Co-Pilot · v1.0</div>
     </div>
   </div>
+  <div id="atmos-bar"></div>
   <div class="header-right">
     <div class="sys-status">
       <div class="status-dot" id="sys-dot"></div>
@@ -630,7 +630,6 @@
 <section class="section" id="hero-section">
   <div class="hero-eyebrow reveal">Mission Brief</div>
   <div id="brief" class="reveal" style="transition-delay:0.1s"></div>
-  <div id="atmos-bar" class="reveal" style="transition-delay:0.25s"></div>
   <div class="scroll-hint" id="scroll-hint">Scroll</div>
 </section>
 
@@ -868,11 +867,11 @@
         <div class="atmos-lbl">UV Index</div>
         <div class="atmos-val" style="color:${uvColor}">${w.uv_index}</div>
       </div>
-      <div class="atmos-cell">
+      <div class="atmos-cell atmos-sun">
         <div class="atmos-lbl">Sunrise</div>
         <div class="atmos-val dim">${fmtSun(w.sunrise)}</div>
       </div>
-      <div class="atmos-cell">
+      <div class="atmos-cell atmos-sun">
         <div class="atmos-lbl">Sunset</div>
         <div class="atmos-val dim">${fmtSun(w.sunset)}</div>
       </div>`;
