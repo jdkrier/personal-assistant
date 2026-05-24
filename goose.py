@@ -35,6 +35,62 @@ def compute_urgency(days_until_due: float) -> float:
     return round(1 / max(days_until_due, 0.5), 4)
 
 
+# ── Weather (Open-Meteo, no API key required) ──────────────────────────────
+WEATHER_LAT =  33.4255   # ASU Tempe, AZ
+WEATHER_LON = -111.9400
+
+_WMO_LABEL: dict[int, str] = {
+    0: "CLEAR SKY",
+    1: "MAINLY CLEAR", 2: "PARTLY CLOUDY", 3: "OVERCAST",
+    45: "FOG", 48: "RIME FOG",
+    51: "LIGHT DRIZZLE", 53: "DRIZZLE", 55: "HEAVY DRIZZLE",
+    61: "LIGHT RAIN", 63: "RAIN", 65: "HEAVY RAIN",
+    71: "LIGHT SNOW", 73: "SNOW", 75: "HEAVY SNOW",
+    77: "SNOW GRAINS",
+    80: "RAIN SHOWERS", 81: "SHOWERS", 82: "HEAVY SHOWERS",
+    85: "SNOW SHOWERS", 86: "HEAVY SNOW SHOWERS",
+    95: "THUNDERSTORM", 96: "THUNDERSTORM + HAIL", 99: "HEAVY THUNDERSTORM",
+}
+
+_WIND_DIRS = ["N","NNE","NE","ENE","E","ESE","SE","SSE",
+              "S","SSW","SW","WSW","W","WNW","NW","NNW"]
+
+
+def _wind_label(deg: float) -> str:
+    return _WIND_DIRS[round(deg / 22.5) % 16]
+
+
+def fetch_weather() -> dict:
+    url = (
+        "https://api.open-meteo.com/v1/forecast"
+        f"?latitude={WEATHER_LAT}&longitude={WEATHER_LON}"
+        "&current=temperature_2m,apparent_temperature,precipitation,"
+        "weather_code,wind_speed_10m,wind_direction_10m"
+        "&daily=sunrise,sunset,uv_index_max,precipitation_sum"
+        "&temperature_unit=fahrenheit&wind_speed_unit=mph"
+        "&precipitation_unit=inch&timezone=America%2FPhoenix&forecast_days=1"
+    )
+    with urllib.request.urlopen(url, timeout=10) as resp:
+        data = json.loads(resp.read())
+
+    cur   = data["current"]
+    daily = data["daily"]
+
+    return {
+        "temp_f":        round(cur["temperature_2m"]),
+        "feels_like_f":  round(cur["apparent_temperature"]),
+        "precip_in":     cur["precipitation"],
+        "weather_code":  cur["weather_code"],
+        "condition":     _WMO_LABEL.get(cur["weather_code"], "UNKNOWN"),
+        "wind_mph":      round(cur["wind_speed_10m"]),
+        "wind_dir":      _wind_label(cur["wind_direction_10m"]),
+        "uv_index":      daily["uv_index_max"][0],
+        "precip_today_in": daily["precipitation_sum"][0],
+        "sunrise":       daily["sunrise"][0].split("T")[1],   # "HH:MM"
+        "sunset":        daily["sunset"][0].split("T")[1],
+    }
+
+
 def fetch_canvas_assignments() -> list[dict]:
     with urllib.request.urlopen(CANVAS_ICAL_URL, timeout=10) as response:
         cal = Calendar.from_ical(response.read())
@@ -184,8 +240,21 @@ def parse_llm_json(text: str) -> dict | None:
     return None
 
 
-def generate_headline(assignments: list[dict], free_blocks: list[dict]) -> dict | None:
+def generate_headline(
+    assignments: list[dict],
+    free_blocks: list[dict],
+    weather: dict | None,
+) -> dict | None:
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+    weather_line = ""
+    if weather:
+        weather_line = (
+            f"\nCurrent weather: {weather['temp_f']}°F, "
+            f"feels {weather['feels_like_f']}°F, {weather['condition']}, "
+            f"wind {weather['wind_mph']} mph {weather['wind_dir']}, "
+            f"UV index {weather['uv_index']}."
+        )
 
     prompt = f"""You are Goose, a personal co-pilot. Generate a scheduling recommendation based on today's data.
 
@@ -194,6 +263,7 @@ Top assignments (most urgent first):
 
 Free time blocks today:
 {json.dumps(free_blocks, indent=2)}
+{weather_line}
 
 Respond with ONLY valid JSON, no other text:
 {{
@@ -213,10 +283,11 @@ Respond with ONLY valid JSON, no other text:
 
 def fetch_and_write_briefing() -> None:
     try:
-        assignments = fetch_canvas_assignments()
-        events = fetch_calendar_events()
-        free_blocks = compute_free_blocks(events)
-        headline = generate_headline(assignments, free_blocks)
+        assignments  = fetch_canvas_assignments()
+        events       = fetch_calendar_events()
+        free_blocks  = compute_free_blocks(events)
+        weather      = fetch_weather()
+        headline     = generate_headline(assignments, free_blocks, weather)
 
         briefing = {
             "status": "ok",
@@ -225,6 +296,7 @@ def fetch_and_write_briefing() -> None:
             "assignments": assignments[:10],
             "events": events,
             "free_blocks": free_blocks,
+            "weather": weather,
         }
     except Exception as e:
         briefing = {
