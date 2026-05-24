@@ -765,19 +765,41 @@
       }
 
       draw(ctx, now) {
-        // ── smoke trail: expanding semi-transparent puffs that grow as they age ──
-        for (let i = 0; i < this.trail.length; i += 2) {
-          const pt  = this.trail[i];
-          const age = Math.min(1, (now - pt.t) / TRAIL_LIFE);
-          // quadratic fade so the tail near the jet is denser
-          const op  = (1 - age) * (1 - age) * 0.22;
-          if (op < 0.004) continue;
-          // puffs start tight (1.5 px) and expand to ~16 px as they disperse
-          const r   = 1.5 + age * 14.5;
-          ctx.beginPath();
-          ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(210,215,220,${op.toFixed(3)})`;
-          ctx.fill();
+        // ── smoke trail: two-pass continuous line — wide+soft outer layer plus
+        //    narrower inner core, both fading with age like real exhaust ──
+        if (this.trail.length >= 2) {
+          const CHUNK = 6; // small chunks so width tapers smoothly along the trail
+          for (let pass = 0; pass < 2; pass++) {
+            for (let i = 0; i < this.trail.length - 1; i += CHUNK) {
+              const end = Math.min(i + CHUNK, this.trail.length - 1);
+              const midIdx = Math.floor((i + end) / 2);
+              const age = Math.min(1, (now - this.trail[midIdx].t) / TRAIL_LIFE);
+              const fresh = 1 - age; // 1 = just emitted, 0 = fully faded
+
+              let op, lw;
+              if (pass === 0) {
+                // outer haze: wide, very transparent — gives the smoke body
+                op = fresh * fresh * 0.10;
+                lw = 1.5 + fresh * 9; // 10.5 px near jet → 1.5 px at tail
+              } else {
+                // inner core: narrower, slightly denser — gives the wispy centre
+                op = fresh * fresh * 0.22;
+                lw = 0.5 + fresh * 3; // 3.5 px near jet → 0.5 px at tail
+              }
+              if (op < 0.004) continue;
+
+              ctx.beginPath();
+              ctx.moveTo(this.trail[i].x, this.trail[i].y);
+              for (let j = i + 1; j <= end; j++) {
+                ctx.lineTo(this.trail[j].x, this.trail[j].y);
+              }
+              ctx.strokeStyle = `rgba(215,218,222,${op.toFixed(3)})`;
+              ctx.lineWidth   = lw;
+              ctx.lineCap     = 'round';
+              ctx.lineJoin    = 'round';
+              ctx.stroke();
+            }
+          }
         }
 
         // ── jet body (only near viewport) — F-14 Tomcat grey ──
