@@ -800,7 +800,7 @@
     const ctx = canvas.getContext('2d');
     const DEG = Math.PI / 180;
     const TRAIL_LIFE = 15000; // ms
-    const MAX_JETS   = 3;
+    const MAX_JETS   = 2;
 
     function resize() {
       canvas.width  = window.innerWidth;
@@ -996,8 +996,8 @@
     const jets = [];
     let last    = performance.now();
 
-    // spawn first jet quickly so user sees it right away
-    let nextSpawn = performance.now() + (3 + Math.random() * 4) * 1000;
+    // spawn first jet almost immediately
+    let nextSpawn = performance.now() + (1 + Math.random() * 2) * 1000;
 
     function loop(now) {
       const dt = Math.min((now - last) / 1000, 0.1);
@@ -1009,7 +1009,7 @@
       const alive = jets.filter(j => j.alive).length;
       if (now >= nextSpawn && alive < MAX_JETS) {
         jets.push(new Jet(now));
-        nextSpawn = now + (18 + Math.random() * 22) * 1000;
+        nextSpawn = now + (6 + Math.random() * 8) * 1000;
       }
 
       // cull dead jets
