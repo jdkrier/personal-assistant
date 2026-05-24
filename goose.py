@@ -397,6 +397,43 @@ async def index():
     return HTMLResponse(content=_HTML_CACHE)
 
 
+@app.get("/api/weather")
+async def get_weather(lat: float, lon: float):
+    """Return live weather for the given coordinates (browser geolocation)."""
+    try:
+        url = (
+            "https://api.open-meteo.com/v1/forecast"
+            f"?latitude={lat}&longitude={lon}"
+            "&current=temperature_2m,apparent_temperature,precipitation,"
+            "weather_code,wind_speed_10m,wind_direction_10m"
+            "&daily=sunrise,sunset,uv_index_max,precipitation_sum"
+            "&temperature_unit=fahrenheit&wind_speed_unit=mph"
+            "&precipitation_unit=inch&timezone=auto&forecast_days=1"
+        )
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            data = json.loads(resp.read())
+
+        cur   = data["current"]
+        daily = data["daily"]
+
+        result = {
+            "temp_f":          round(cur["temperature_2m"]),
+            "feels_like_f":    round(cur["apparent_temperature"]),
+            "precip_in":       cur["precipitation"],
+            "weather_code":    cur["weather_code"],
+            "condition":       _WMO_LABEL.get(cur["weather_code"], "UNKNOWN"),
+            "wind_mph":        round(cur["wind_speed_10m"]),
+            "wind_dir":        _wind_label(cur["wind_direction_10m"]),
+            "uv_index":        daily["uv_index_max"][0],
+            "precip_today_in": daily["precipitation_sum"][0],
+            "sunrise":         daily["sunrise"][0].split("T")[1],
+            "sunset":          daily["sunset"][0].split("T")[1],
+        }
+        return JSONResponse(result)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=502)
+
+
 @app.get("/api/data")
 async def get_data():
     if not BRIEFING_FILE.exists():

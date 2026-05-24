@@ -769,47 +769,9 @@
       $('brief').innerHTML = `<div class="loading-state"><p>Computing recommendation_</p></div>`;
     }
 
-    // Weather bar
-    const w = data.weather;
-    if (w) {
-      function fmtSun(hhmm) {
-        const [h, m] = hhmm.split(':').map(Number);
-        const ampm = h < 12 ? 'AM' : 'PM';
-        const disp = h % 12 || 12;
-        return `${disp}:${String(m).padStart(2,'0')} ${ampm}`;
-      }
-      const uvColor = w.uv_index >= 8 ? '#ff4444'
-                    : w.uv_index >= 6 ? '#ffaa44'
-                    : w.uv_index >= 3 ? '#ffdd44' : 'var(--cyan)';
-      $('atmos-bar').innerHTML = `
-        <div class="atmos-cell">
-          <div class="atmos-lbl">Temp</div>
-          <div class="atmos-val">${w.temp_f}°F</div>
-        </div>
-        <div class="atmos-cell">
-          <div class="atmos-lbl">Feels Like</div>
-          <div class="atmos-val dim">${w.feels_like_f}°F</div>
-        </div>
-        <div class="atmos-cell">
-          <div class="atmos-lbl">Conditions</div>
-          <div class="atmos-val">${esc(w.condition)}</div>
-        </div>
-        <div class="atmos-cell">
-          <div class="atmos-lbl">Wind</div>
-          <div class="atmos-val dim">${w.wind_mph} MPH ${esc(w.wind_dir)}</div>
-        </div>
-        <div class="atmos-cell">
-          <div class="atmos-lbl">UV Index</div>
-          <div class="atmos-val" style="color:${uvColor}">${w.uv_index}</div>
-        </div>
-        <div class="atmos-cell">
-          <div class="atmos-lbl">Sunrise</div>
-          <div class="atmos-val dim">${fmtSun(w.sunrise)}</div>
-        </div>
-        <div class="atmos-cell">
-          <div class="atmos-lbl">Sunset</div>
-          <div class="atmos-val dim">${fmtSun(w.sunset)}</div>
-        </div>`;
+    // Weather bar — only render from briefing if geolocation hasn't taken over
+    if (data.weather && !$('atmos-bar').dataset.geolocated) {
+      renderWeather(data.weather);
     }
 
     // Assignments
@@ -872,6 +834,67 @@
 
   poll();
   setInterval(poll, 60_000);
+
+  // ── GEOLOCATION WEATHER ────────────────────────────────────────────────────
+  // Ask for current location and refresh the ATMOS bar with local conditions.
+  // Falls back to the server-side Tempe coords if permission is denied.
+  function renderWeather(w) {
+    if (!w || w.error) return;
+    function fmtSun(hhmm) {
+      const [h, m] = hhmm.split(':').map(Number);
+      return `${h % 12 || 12}:${String(m).padStart(2,'0')} ${h < 12 ? 'AM' : 'PM'}`;
+    }
+    const uvColor = w.uv_index >= 8 ? '#ff4444'
+                  : w.uv_index >= 6 ? '#ffaa44'
+                  : w.uv_index >= 3 ? '#ffdd44' : 'var(--cyan)';
+    $('atmos-bar').innerHTML = `
+      <div class="atmos-cell">
+        <div class="atmos-lbl">Temp</div>
+        <div class="atmos-val">${w.temp_f}°F</div>
+      </div>
+      <div class="atmos-cell">
+        <div class="atmos-lbl">Feels Like</div>
+        <div class="atmos-val dim">${w.feels_like_f}°F</div>
+      </div>
+      <div class="atmos-cell">
+        <div class="atmos-lbl">Conditions</div>
+        <div class="atmos-val">${esc(w.condition)}</div>
+      </div>
+      <div class="atmos-cell">
+        <div class="atmos-lbl">Wind</div>
+        <div class="atmos-val dim">${w.wind_mph} MPH ${esc(w.wind_dir)}</div>
+      </div>
+      <div class="atmos-cell">
+        <div class="atmos-lbl">UV Index</div>
+        <div class="atmos-val" style="color:${uvColor}">${w.uv_index}</div>
+      </div>
+      <div class="atmos-cell">
+        <div class="atmos-lbl">Sunrise</div>
+        <div class="atmos-val dim">${fmtSun(w.sunrise)}</div>
+      </div>
+      <div class="atmos-cell">
+        <div class="atmos-lbl">Sunset</div>
+        <div class="atmos-val dim">${fmtSun(w.sunset)}</div>
+      </div>`;
+  }
+
+  async function fetchWeatherByCoords(lat, lon) {
+    try {
+      const w = await (await fetch(`/api/weather?lat=${lat}&lon=${lon}`)).json();
+      renderWeather(w);
+      // Mark so briefing poll() doesn't overwrite with Tempe coords
+      $('atmos-bar').dataset.geolocated = '1';
+    } catch {}
+  }
+
+  if ('geolocation' in navigator) {
+    navigator.geolocation.getCurrentPosition(
+      pos => fetchWeatherByCoords(pos.coords.latitude, pos.coords.longitude),
+      ()  => {/* denied — briefing weather (Tempe) already rendered by poll() */},
+      { timeout: 8000, maximumAge: 300_000 }
+    );
+  }
+  // ── END GEOLOCATION WEATHER ────────────────────────────────────────────────
 
   // ── JET ANIMATION ──────────────────────────────────────────────────────────
   (function () {
