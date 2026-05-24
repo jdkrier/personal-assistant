@@ -237,15 +237,22 @@ def fetch_and_write_briefing() -> None:
     os.replace(BRIEFING_TMP, BRIEFING_FILE)
 
 
-# index.html is cached in memory to avoid repeated file I/O under the
-# macOS LaunchAgent security context (com.apple.provenance EDEADLK).
-# We try to load it at import time; if that fails (race on startup) we
-# retry on the first HTTP request instead of crashing the whole server.
+# index.html is cached in memory.  Under macOS LaunchAgent context the
+# com.apple.provenance xattr on editor-written files can cause Python's
+# buffered IO to raise EDEADLK; raw os.open/os.read bypasses that layer.
+def _read_raw(path: Path) -> bytes:
+    fd = os.open(str(path), os.O_RDONLY)
+    try:
+        return os.read(fd, os.fstat(fd).st_size)
+    finally:
+        os.close(fd)
+
+
 _HTML_CACHE: bytes = b""
 try:
-    _HTML_CACHE = (STATIC_DIR / "index.html").read_bytes()
+    _HTML_CACHE = _read_raw(STATIC_DIR / "index.html")
 except OSError:
-    pass  # will retry in the route handler
+    pass  # will retry on first request
 
 
 @asynccontextmanager
@@ -278,11 +285,13 @@ async def index():
     global _HTML_CACHE
     if not _HTML_CACHE:
         try:
-            _HTML_CACHE = (STATIC_DIR / "index.html").read_bytes()
+            _HTML_CACHE = _read_raw(STATIC_DIR / "index.html")
         except OSError:
             return HTMLResponse(
-                content=b"<html><body style='background:#06080c;color:#00d4ff;font-family:monospace;padding:2rem'>"
-                        b"<p>GOOSE STARTING UP &mdash; please refresh in a moment.</p></body></html>",
+                content=b"<html><body style='background:#06080c;color:#00d4ff;"
+                        b"font-family:monospace;padding:2rem'>"
+                        b"<p>GOOSE STARTING UP \xe2\x80\x94 please refresh in a moment.</p>"
+                        b"</body></html>",
                 status_code=503,
             )
     return HTMLResponse(content=_HTML_CACHE)
