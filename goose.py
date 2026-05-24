@@ -9,10 +9,10 @@ from pathlib import Path
 import anthropic
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from google.auth.transport.requests import Request
+from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from icalendar import Calendar
@@ -77,7 +77,7 @@ def fetch_calendar_events() -> list[dict]:
         creds = Credentials.from_authorized_user_file(str(TOKEN_PATH))
 
         if creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+            creds.refresh(GoogleAuthRequest())
             TOKEN_PATH.write_text(creds.to_json())
 
         if not creds.valid:
@@ -237,6 +237,17 @@ def fetch_and_write_briefing() -> None:
     os.replace(BRIEFING_TMP, BRIEFING_FILE)
 
 
+# index.html is cached in memory to avoid repeated file I/O under the
+# macOS LaunchAgent security context (com.apple.provenance EDEADLK).
+# We try to load it at import time; if that fails (race on startup) we
+# retry on the first HTTP request instead of crashing the whole server.
+_HTML_CACHE: bytes = b""
+try:
+    _HTML_CACHE = (STATIC_DIR / "index.html").read_bytes()
+except OSError:
+    pass  # will retry in the route handler
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     STATIC_DIR.mkdir(exist_ok=True)
@@ -264,9 +275,17 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
 async def index():
-    # Read synchronously to avoid anyio EDEADLK under macOS LaunchAgent
-    html = (STATIC_DIR / "index.html").read_bytes()
-    return HTMLResponse(content=html)
+    global _HTML_CACHE
+    if not _HTML_CACHE:
+        try:
+            _HTML_CACHE = (STATIC_DIR / "index.html").read_bytes()
+        except OSError:
+            return HTMLResponse(
+                content=b"<html><body style='background:#06080c;color:#00d4ff;font-family:monospace;padding:2rem'>"
+                        b"<p>GOOSE STARTING UP &mdash; please refresh in a moment.</p></body></html>",
+                status_code=503,
+            )
+    return HTMLResponse(content=_HTML_CACHE)
 
 
 @app.get("/api/data")
@@ -277,3 +296,48 @@ async def get_data():
         return JSONResponse(json.loads(BRIEFING_FILE.read_text()))
     except (json.JSONDecodeError, OSError):
         return JSONResponse({"status": "loading"})
+
+
+@app.post("/api/chat")
+async def chat(request: Request):
+    body = await request.json()
+    messages = body.get("messages", [])
+
+    briefing: dict = {}
+    if BRIEFING_FILE.exists():
+        try:
+            briefing = json.loads(BRIEFING_FILE.read_text())
+        except Exception:
+            pass
+
+    local_now = datetime.now().strftime("%A, %B %d, %Y %I:%M %p")
+
+    system_prompt = f"""You are Goose, a personal AI co-pilot. Today is {local_now}.
+
+Live briefing data:
+{json.dumps(briefing, indent=2)}
+
+Your job: give sharp, tactical answers. Reference specific assignments, times, \
+and free blocks from the briefing when relevant. Keep replies under 120 words \
+unless the user asks for more detail. No fluff."""
+
+    def generate():
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        try:
+            with client.messages.stream(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=512,
+                system=system_prompt,
+                messages=messages,
+            ) as stream:
+                for text in stream.text_stream:
+                    yield f"data: {json.dumps({'text': text})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
