@@ -6,3 +6,10 @@ __pycache__/
 .DS_Store
 briefing.json
 briefing.json.tmp
+# Runtime data — now lives in ~/.goose/data/, not the project dir
+daily_log.json
+patterns.json
+groupme_state.json
+flights_cache.json
+context.json
+static/index_serve.html

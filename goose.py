@@ -1,6 +1,9 @@
+import asyncio
 import json
 import os
 import re
+import time
+import urllib.error
 import urllib.request
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
@@ -19,16 +22,39 @@ from icalendar import Calendar
 
 BASE_DIR = Path(__file__).parent.resolve()
 
+# Runtime data lives OUTSIDE the Desktop/iCloud-synced project directory.
+# iCloud evicts infrequently-accessed files to the cloud (dataless flag), and
+# when the LaunchAgent process re-hydrates them it IPC-blocks with the cloudkit
+# daemon, causing EDEADLK.  ~/.goose/data/ is never iCloud-synced.
+DATA_DIR = Path.home() / ".goose" / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
 # Env vars are injected by the LaunchAgent plist (EnvironmentVariables key).
 # For manual runs, export them in your shell first or copy .env to your session.
 
 CANVAS_ICAL_URL = os.environ["CANVAS_ICAL_URL"]
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 
-BRIEFING_FILE = BASE_DIR / "briefing.json"
-BRIEFING_TMP  = BASE_DIR / "briefing.json.tmp"
+BRIEFING_FILE = DATA_DIR / "briefing.json"
+BRIEFING_TMP  = DATA_DIR / "briefing.json.tmp"
 STATIC_DIR    = BASE_DIR / "static"
-TOKEN_PATH    = BASE_DIR / "token.json"
+TOKEN_PATH    = DATA_DIR / "token.json"
+
+# ── Live Flight Radar ────────────────────────────────────────────────────────
+FLIGHTS_CACHE_FILE = DATA_DIR / "flights_cache.json"
+OPENSKY_URL        = "https://opensky-network.org/api/states/all"
+FLIGHTS_BOX_DEG    = 1.2   # ~84 miles radius around center point
+
+# ── Behavioral Learning ──────────────────────────────────────────────────────
+DAILY_LOG_FILE = DATA_DIR / "daily_log.json"
+PATTERNS_FILE  = DATA_DIR / "patterns.json"
+CONTEXT_FILE   = DATA_DIR / "context.json"
+
+# ── GroupMe (read-only observer — NEVER posts or sends) ─────────────────────
+GROUPME_ACCESS_TOKEN = os.environ.get("GROUPME_ACCESS_TOKEN", "")
+GROUPME_GROUP_ID     = "30939626"   # "people" — fraternity group chat
+GROUPME_STATE_FILE   = DATA_DIR / "groupme_state.json"
+GROUPME_API_BASE     = "https://api.groupme.com/v3"
 
 
 def compute_urgency(days_until_due: float) -> float:
@@ -130,11 +156,19 @@ def fetch_calendar_events() -> list[dict]:
         return []
 
     try:
-        creds = Credentials.from_authorized_user_file(str(TOKEN_PATH))
+        token_data = _read_token_json()
+        if not token_data:
+            return []
+        creds = Credentials.from_authorized_user_info(token_data)
 
         if creds.expired and creds.refresh_token:
             creds.refresh(GoogleAuthRequest())
-            TOKEN_PATH.write_text(creds.to_json())
+            raw = creds.to_json().encode()
+            fd = os.open(str(TOKEN_PATH), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            try:
+                os.write(fd, raw)
+            finally:
+                os.close(fd)
 
         if not creds.valid:
             return []
@@ -244,6 +278,7 @@ def generate_headline(
     assignments: list[dict],
     free_blocks: list[dict],
     weather: dict | None,
+    patterns: dict | None = None,
 ) -> dict | None:
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -256,6 +291,34 @@ def generate_headline(
             f"UV index {weather['uv_index']}."
         )
 
+    context      = _read_json(CONTEXT_FILE, {})
+    context_line = ""
+    if context:
+        sched = context.get("schedule", {})
+        notes = context.get("notes", [])
+        context_line = (
+            f"\n\nJackson's current life context:"
+            f"\n- Schedule: {sched.get('type','')}, {sched.get('weekday_hours','')} Mon–Thu, {sched.get('friday_hours','')} Fri"
+            f"\n- Work mode: {sched.get('work_mode','')} — {sched.get('wfh_days_per_week','')} days WFH per week"
+            f"\n- Valid through: {sched.get('valid_through','')}"
+            f"\n- Rules: {'; '.join(notes)}"
+        )
+
+    patterns_line = ""
+    if patterns and isinstance(patterns.get("derived"), dict):
+        d = patterns["derived"]
+        parts = []
+        if d.get("scheduling_notes"):
+            parts.append(f"Scheduling rules: {d['scheduling_notes']}")
+        if d.get("weather_insight"):
+            parts.append(f"Weather pattern: {d['weather_insight']}")
+        if d.get("avoid_scheduling"):
+            parts.append(f"Avoid: {', '.join(d['avoid_scheduling'])}")
+        if d.get("best_scheduling"):
+            parts.append(f"Best slots: {', '.join(d['best_scheduling'])}")
+        if parts:
+            patterns_line = "\n\nLearned behavioral patterns (use these to personalise the recommendation):\n" + "\n".join(parts)
+
     prompt = f"""You are Goose, a personal co-pilot. Generate a scheduling recommendation based on today's data.
 
 Top assignments (most urgent first):
@@ -263,7 +326,7 @@ Top assignments (most urgent first):
 
 Free time blocks today:
 {json.dumps(free_blocks, indent=2)}
-{weather_line}
+{weather_line}{context_line}{patterns_line}
 
 Respond with ONLY valid JSON, no other text:
 {{
@@ -281,13 +344,517 @@ Respond with ONLY valid JSON, no other text:
     return parse_llm_json(message.content[0].text)
 
 
+def _groupme_read_state() -> dict:
+    if GROUPME_STATE_FILE.exists():
+        try:
+            return json.loads(GROUPME_STATE_FILE.read_text())
+        except Exception:
+            pass
+    return {"last_message_id": None, "last_check": None, "summary": None, "events": []}
+
+
+def _groupme_write_state(state: dict) -> None:
+    tmp = GROUPME_STATE_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, indent=2))
+    os.replace(tmp, GROUPME_STATE_FILE)
+
+
+def fetch_groupme_messages(since_id: str | None = None) -> list[dict]:
+    """Fetch messages from the group chat. Read-only — never posts anything."""
+    if not GROUPME_ACCESS_TOKEN:
+        return []
+
+    url = (
+        f"{GROUPME_API_BASE}/groups/{GROUPME_GROUP_ID}/messages"
+        f"?token={GROUPME_ACCESS_TOKEN}&limit=100"
+    )
+    if since_id:
+        url += f"&since_id={since_id}"
+
+    try:
+        req = urllib.request.Request(url, headers={"Cache-Control": "no-cache"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        return data.get("response", {}).get("messages", [])
+    except urllib.error.HTTPError as e:
+        if e.code == 304:
+            return []   # not modified — no new messages, not an error
+        _log.warning("fetch_groupme_messages HTTP error: %s", e)
+        return []
+    except Exception as e:
+        _log.warning("fetch_groupme_messages failed: %s", e)
+        return []
+
+
+def analyze_groupme_messages(messages: list[dict]) -> dict:
+    """Use Claude to extract events and summarize new messages."""
+    if not messages:
+        return {"summary": None, "events": []}
+
+    # Reverse so messages read oldest → newest
+    msgs_lines = []
+    for m in reversed(messages):
+        ts   = datetime.fromtimestamp(m["created_at"]).strftime("%m/%d %I:%M%p")
+        name = m.get("name", "Unknown")
+        text = (m.get("text") or "").strip()
+        if text:
+            msgs_lines.append(f"[{ts}] {name}: {text}")
+
+    if not msgs_lines:
+        return {"summary": None, "events": []}
+
+    today = datetime.now().strftime("%A, %B %d, %Y")
+    block = "\n".join(msgs_lines[-100:])   # cap for token safety
+
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    prompt = f"""You are reading messages from a college fraternity group chat (200 members).
+Today is {today}.
+
+Messages (oldest → newest):
+{block}
+
+Respond with ONLY valid JSON:
+{{
+  "summary": "A detailed, conversational summary written like a friend catching you up. Cover the main topics, who said what (by first name if mentioned), any drama or important decisions, upcoming plans, and the general vibe of the chat. Write naturally — no bullet points, no military language, just plain casual English. Aim for 5-8 sentences.",
+  "events": [
+    {{
+      "title": "Event name",
+      "date": "YYYY-MM-DD",
+      "time": "HH:MM",
+      "duration_hours": 2,
+      "description": "brief description"
+    }}
+  ]
+}}
+
+Rules:
+- summary: write it like you're texting a friend to catch them up. Conversational, specific, detailed.
+- events: ONLY include things with a clear date (meeting, party, social, chapter, etc). Empty array if none.
+- Resolve relative dates like "Friday" or "this weekend" relative to today ({today}).
+- Omit "time" field if no time is mentioned for an event."""
+
+    message = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    return parse_llm_json(message.content[0].text) or {"summary": None, "events": []}
+
+
+def _read_token_json() -> dict | None:
+    """Read token.json using os.open with EDEADLK retry (same pattern as _read_json)."""
+    import errno as _errno
+    for attempt in range(8):
+        try:
+            fd = os.open(str(TOKEN_PATH), os.O_RDONLY)
+            try:
+                return json.loads(os.read(fd, os.fstat(fd).st_size))
+            finally:
+                os.close(fd)
+        except OSError as e:
+            if e.errno == _errno.EDEADLK and attempt < 7:
+                time.sleep(min(2.0, 0.5 * (attempt + 1)))
+                continue
+            _log.warning("_read_token_json failed after %d attempt(s): %s", attempt + 1, e)
+            return None
+        except Exception as e:
+            _log.warning("_read_token_json failed: %s", e)
+            return None
+    return None
+
+
+def add_groupme_events_to_calendar(events: list[dict]) -> list[str]:
+    """Add detected GroupMe events to Google Calendar. Returns titles of added events."""
+    if not events or not TOKEN_PATH.exists():
+        return []
+
+    added: list[str] = []
+    try:
+        token_data = _read_token_json()
+        if token_data is None:
+            return []
+        creds = Credentials.from_authorized_user_info(token_data)
+        if creds.expired and creds.refresh_token:
+            creds.refresh(GoogleAuthRequest())
+            raw = creds.to_json().encode()
+            fd = os.open(str(TOKEN_PATH), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            try:
+                os.write(fd, raw)
+            finally:
+                os.close(fd)
+        if not creds.valid:
+            return []
+
+        service = build("calendar", "v3", credentials=creds)
+
+        for event in events:
+            try:
+                date_str = event.get("date")
+                if not date_str:
+                    continue
+
+                time_str     = event.get("time")
+                duration     = float(event.get("duration_hours", 2))
+
+                if time_str:
+                    start_dt = datetime.fromisoformat(f"{date_str}T{time_str}:00")
+                    end_dt   = start_dt + timedelta(hours=duration)
+                    body = {
+                        "summary":     event["title"],
+                        "description": event.get("description", "Detected from GroupMe"),
+                        "start": {"dateTime": start_dt.isoformat(), "timeZone": "America/Phoenix"},
+                        "end":   {"dateTime": end_dt.isoformat(),   "timeZone": "America/Phoenix"},
+                    }
+                else:
+                    body = {
+                        "summary":     event["title"],
+                        "description": event.get("description", "Detected from GroupMe"),
+                        "start": {"date": date_str},
+                        "end":   {"date": date_str},
+                    }
+
+                service.events().insert(calendarId="primary", body=body).execute()
+                added.append(event["title"])
+                _log.info("GroupMe: added calendar event '%s'", event["title"])
+            except Exception as e:
+                _log.warning("GroupMe: failed to add event '%s': %s", event.get("title"), e)
+
+    except Exception as e:
+        _log.warning("GroupMe: calendar auth failed: %s", e)
+
+    return added
+
+
+def fetch_groupme_pinned() -> list[dict]:
+    """Fetch currently pinned messages. Read-only — never posts anything."""
+    if not GROUPME_ACCESS_TOKEN:
+        return []
+
+    url = (
+        f"{GROUPME_API_BASE}/groups/{GROUPME_GROUP_ID}/messages"
+        f"?token={GROUPME_ACCESS_TOKEN}&pinned=true&limit=20"
+    )
+    try:
+        req = urllib.request.Request(url, headers={"Cache-Control": "no-cache"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        messages = data.get("response", {}).get("messages", [])
+        # Only include messages that are actually pinned (pinned_at is set)
+        return [
+            {
+                "id":        m["id"],
+                "name":      m.get("name", "Unknown"),
+                "text":      (m.get("text") or "").strip(),
+                "pinned_at": m.get("pinned_at"),
+                "created_at": m.get("created_at"),
+            }
+            for m in messages
+            if m.get("pinned_at")
+        ]
+    except urllib.error.HTTPError as e:
+        if e.code == 304:
+            return []
+        _log.warning("fetch_groupme_pinned HTTP error: %s", e)
+        return []
+    except Exception as e:
+        _log.warning("fetch_groupme_pinned failed: %s", e)
+        return []
+
+
+def poll_groupme() -> None:
+    """
+    Read-only GroupMe poll — runs every 20 minutes via APScheduler.
+    Fetches new messages, summarizes, detects events, adds to Google Calendar.
+    NEVER posts, sends, reacts, or modifies anything in GroupMe.
+    """
+    if not GROUPME_ACCESS_TOKEN:
+        return
+
+    state   = _groupme_read_state()
+    last_id = state.get("last_message_id")
+
+    messages = fetch_groupme_messages(since_id=last_id)
+
+    state["last_check"] = datetime.now(timezone.utc).isoformat()
+    state["pinned"] = fetch_groupme_pinned()
+
+    if not messages:
+        state["caught_up"] = True
+        state["new_message_count"] = 0
+        # Still prune events older than 7 days even when nothing new came in
+        today  = datetime.now().date()
+        cutoff = today - timedelta(days=7)
+        state["events"] = [
+            e for e in state.get("events", [])
+            if not e.get("date") or datetime.fromisoformat(e["date"]).date() >= cutoff
+        ]
+        _groupme_write_state(state)
+        return
+
+    # New messages — analyze with Claude
+    state["caught_up"] = False
+    analysis     = analyze_groupme_messages(messages)
+    added_events = []
+    if analysis.get("events"):
+        added_events = add_groupme_events_to_calendar(analysis["events"])
+
+    # Merge new events with existing ones — persist until 7 days overdue
+    today   = datetime.now().date()
+    cutoff  = today - timedelta(days=7)
+
+    existing = {(e.get("title",""), e.get("date","")): e for e in state.get("events", [])}
+    for e in analysis.get("events", []):
+        existing[(e.get("title",""), e.get("date",""))] = e  # new wins on collision
+
+    def _keep(e: dict) -> bool:
+        ds = e.get("date")
+        if not ds:
+            return True
+        try:
+            return datetime.fromisoformat(ds).date() >= cutoff
+        except Exception:
+            return True
+
+    merged_events = [e for e in existing.values() if _keep(e)]
+
+    # Merge calendar-added list too
+    all_added = list(set(state.get("events_added_to_calendar", []) + added_events))
+
+    # GroupMe returns newest first; messages[0] is the most recent
+    state["last_message_id"]           = messages[0]["id"]
+    state["summary"]                   = analysis.get("summary")
+    state["events"]                    = merged_events
+    state["events_added_to_calendar"]  = all_added
+    state["new_message_count"]         = len(messages)
+
+    _groupme_write_state(state)
+    _log.info(
+        "GroupMe: %d new messages, %d events detected, %d added to calendar",
+        len(messages), len(analysis.get("events", [])), len(added_events),
+    )
+
+
+def _read_json(path: Path, default):
+    """Read a JSON file using os.open with EDEADLK retry.
+
+    Under macOS LaunchAgent, files with com.apple.provenance xattr cause the
+    security daemon to serialize I/O — triggering EDEADLK (errno 11) on nearby
+    concurrent reads even on clean files.  Retrying after a short sleep
+    consistently succeeds once the daemon finishes its check.
+    """
+    if not path.exists():
+        return default
+    import errno as _errno
+    for attempt in range(8):          # initial try + up to 7 retries (~14 s total)
+        try:
+            fd = os.open(str(path), os.O_RDONLY)
+            try:
+                return json.loads(os.read(fd, os.fstat(fd).st_size))
+            finally:
+                os.close(fd)
+        except OSError as e:
+            if e.errno == _errno.EDEADLK and attempt < 7:
+                time.sleep(min(2.0, 0.5 * (attempt + 1)))  # 0.5, 1, 1.5, 2, 2, 2, 2 s
+                continue
+            _log.warning("_read_json(%s) failed after %d attempt(s): %s",
+                         path.name, attempt + 1, e)
+            return default
+        except Exception as e:
+            _log.warning("_read_json(%s) failed: %s", path.name, e)
+            return default
+    return default                    # unreachable, but satisfies type checker
+
+
+def _write_json(path: Path, data) -> None:
+    """Atomic write using raw os.open with EDEADLK retry.
+
+    Using os.open (not write_text) avoids macOS tagging the file with
+    com.apple.provenance, which would cause EDEADLK on future LaunchAgent reads.
+    """
+    tmp = path.with_suffix(".tmp")
+    raw = json.dumps(data, indent=2).encode()
+    import errno as _errno
+    for attempt in range(8):
+        try:
+            fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+            try:
+                os.write(fd, raw)
+            finally:
+                os.close(fd)
+            os.replace(tmp, path)
+            return
+        except OSError as e:
+            if e.errno == _errno.EDEADLK and attempt < 7:
+                time.sleep(min(2.0, 0.5 * (attempt + 1)))
+                continue
+            _log.warning("_write_json(%s) failed after %d attempt(s): %s",
+                         path.name, attempt + 1, e)
+            raise
+
+
+_SEMESTER_KEYWORDS = {
+    "class", "lecture", "lab", "seminar", "orientation",
+    "move in", "move-in", "first day", "syllabus", "asu",
+    "registration", "tuition", "schedule", "transcript",
+}
+
+
+def detect_schedule_change() -> str | None:
+    """
+    Scan Canvas iCal and Google Calendar for signs of a new semester starting.
+    Returns a human-readable note if a change is detected, else None.
+    Updates context.json automatically.
+    """
+    context = _read_json(CONTEXT_FILE, {})
+    # Only run while the schedule type is still 'internship'
+    if context.get("schedule", {}).get("type") != "internship":
+        return None
+    # Don't re-detect if already flagged
+    if context.get("schedule", {}).get("semester_detected"):
+        return None
+
+    detected_event: str | None = None
+    detected_date:  str | None = None
+
+    # ── 1. Canvas iCal — look for assignments with Aug+ due dates ──────────
+    try:
+        with urllib.request.urlopen(CANVAS_ICAL_URL, timeout=10) as resp:
+            cal = Calendar.from_ical(resp.read())
+        today = datetime.now(timezone.utc).date()
+        aug1  = today.replace(month=8, day=1) if today.month < 8 else \
+                today.replace(year=today.year + 1, month=8, day=1)
+
+        for component in cal.walk():
+            if component.name != "VEVENT":
+                continue
+            dtstart = component.get("DTSTART")
+            if dtstart is None:
+                continue
+            due = dtstart.dt
+            if hasattr(due, "date"):
+                due = due.date()
+            if due >= aug1:
+                summary = str(component.get("SUMMARY", ""))
+                detected_event = f"Canvas assignment: \"{summary}\" due {due.isoformat()}"
+                detected_date  = due.isoformat()
+                break
+    except Exception as e:
+        _log.debug("detect_schedule_change Canvas check: %s", e)
+
+    # ── 2. Google Calendar — look for semester-related events ──────────────
+    if not detected_event and TOKEN_PATH.exists():
+        try:
+            token_data = _read_token_json()
+            if token_data:
+                creds = Credentials.from_authorized_user_info(token_data)
+                if creds.expired and creds.refresh_token:
+                    creds.refresh(GoogleAuthRequest())
+                if creds.valid:
+                    service = build("calendar", "v3", credentials=creds)
+                    now    = datetime.now(timezone.utc)
+                    future = now + timedelta(days=120)
+                    result = service.events().list(
+                        calendarId="primary",
+                        timeMin=now.isoformat(),
+                        timeMax=future.isoformat(),
+                        singleEvents=True,
+                        orderBy="startTime",
+                    ).execute()
+                    for event in result.get("items", []):
+                        title = event.get("summary", "").lower()
+                        if any(kw in title for kw in _SEMESTER_KEYWORDS):
+                            start = event["start"].get("dateTime", event["start"].get("date", ""))
+                            detected_event = f"Calendar event: \"{event.get('summary')}\" on {start[:10]}"
+                            detected_date  = start[:10]
+                            break
+        except Exception as e:
+            _log.debug("detect_schedule_change Calendar check: %s", e)
+
+    if not detected_event:
+        return None
+
+    # ── Detected — update context.json ────────────────────────────────────
+    context.setdefault("schedule", {})["semester_detected"]    = detected_date
+    context.setdefault("schedule", {})["semester_detected_via"] = detected_event
+    context.setdefault("notes", []).append(
+        f"AUTO-DETECTED: Semester likely starts around {detected_date}. "
+        f"Triggered by: {detected_event}. Schedule rules will need updating."
+    )
+    _write_json(CONTEXT_FILE, context)
+    _log.info("detect_schedule_change: semester detected around %s via %s", detected_date, detected_event)
+    return (
+        f"Heads up — Goose detected your fall semester may be starting around "
+        f"{detected_date} ({detected_event}). Schedule recommendations will adjust. "
+        f"Let me know when you're back in Tempe and I'll update your context."
+    )
+
+
+def analyze_patterns() -> None:
+    """
+    Daily job: use Claude to extract behavioral patterns from the log.
+    Skips silently until there are at least 7 entries.
+    """
+    log = _read_json(DAILY_LOG_FILE, [])
+    if len(log) < 7:
+        _log.info("analyze_patterns: only %d entries — need 7 to run", len(log))
+        return
+
+    patterns = _read_json(PATTERNS_FILE, {})
+    feedback_log = patterns.get("feedback_log", [])
+
+    log_text      = json.dumps(log[-30:], indent=2)
+    feedback_text = json.dumps(feedback_log[-20:], indent=2) if feedback_log else "None yet"
+
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    prompt = f"""You are analyzing behavioral data for a college student named Jackson at ASU in Tempe, Arizona.
+
+Daily activity log (one entry per day, Jackson filled these in himself):
+{log_text}
+
+Scheduling feedback log (times Jackson rejected Goose's suggestion and said why):
+{feedback_text}
+
+Extract Jackson's behavioral patterns and respond with ONLY valid JSON:
+{{
+  "typical_out_days": ["Friday", "Saturday"],
+  "avg_pregame_time": "21:00",
+  "avg_out_frequency_per_week": 2.5,
+  "preferred_work_times": ["14:00-17:00"],
+  "avoid_scheduling": ["Friday evenings", "nice weather under 90F"],
+  "best_scheduling": ["Monday-Wednesday afternoons", "hot days over 100F"],
+  "weather_insight": "One sentence about how weather affects his productivity.",
+  "scheduling_notes": "Specific rules Goose should follow when suggesting work times.",
+  "summary": "2-3 sentences describing Jackson's patterns in plain English."
+}}
+
+Use null for any field where there isn't enough data yet. Be specific and concrete."""
+
+    msg = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=768,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    derived = parse_llm_json(msg.content[0].text)
+    if derived:
+        patterns["derived"]             = derived
+        patterns["observations_count"]  = len(log)
+        patterns["feedback_log"]        = feedback_log
+        patterns["last_analyzed"]       = datetime.now(timezone.utc).isoformat()
+        _write_json(PATTERNS_FILE, patterns)
+        _log.info("analyze_patterns: updated from %d observations", len(log))
+
+
 def fetch_and_write_briefing() -> None:
     try:
-        assignments  = fetch_canvas_assignments()
-        events       = fetch_calendar_events()
-        free_blocks  = compute_free_blocks(events)
-        weather      = fetch_weather()
-        headline     = generate_headline(assignments, free_blocks, weather)
+        assignments       = fetch_canvas_assignments()
+        events            = fetch_calendar_events()
+        free_blocks       = compute_free_blocks(events)
+        weather           = fetch_weather()
+        patterns          = _read_json(PATTERNS_FILE, {})
+        headline          = generate_headline(assignments, free_blocks, weather, patterns)
+        schedule_alert    = detect_schedule_change()
 
         briefing = {
             "status": "ok",
@@ -297,6 +864,7 @@ def fetch_and_write_briefing() -> None:
             "events": events,
             "free_blocks": free_blocks,
             "weather": weather,
+            "schedule_alert": schedule_alert,
         }
     except Exception as e:
         briefing = {
@@ -305,8 +873,7 @@ def fetch_and_write_briefing() -> None:
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    BRIEFING_TMP.write_text(json.dumps(briefing, indent=2))
-    os.replace(BRIEFING_TMP, BRIEFING_FILE)
+    _write_json(BRIEFING_FILE, briefing)
 
 
 # index.html is cached in memory.  Under macOS LaunchAgent context the
@@ -359,15 +926,37 @@ except OSError as e:
 async def lifespan(app: FastAPI):
     STATIC_DIR.mkdir(exist_ok=True)
 
-    seed = {"status": "loading", "generated_at": datetime.now(timezone.utc).isoformat()}
-    BRIEFING_TMP.write_text(json.dumps(seed))
-    os.replace(BRIEFING_TMP, BRIEFING_FILE)
+    # Under macOS LaunchAgent, the provenance security daemon runs checks on the
+    # process immediately after launch, serializing all file I/O and causing
+    # EDEADLK on os.open calls for ~15-25 s.  Waiting here lets those checks
+    # finish before we touch any files.
+    await asyncio.sleep(5)
 
+    seed = {"status": "loading", "generated_at": datetime.now(timezone.utc).isoformat()}
+    try:
+        _write_json(BRIEFING_FILE, seed)
+    except OSError:
+        # If the seed write fails (rare EDEADLK on cold start), keep the old
+        # briefing.json in place — the scheduler job will overwrite it shortly.
+        pass
+
+    # Delay initial scheduler jobs by 25 s on top of the 5 s above = ~30 s
+    # total before the first file-heavy job runs.
+    _startup_delay = timedelta(seconds=25)
     scheduler = BackgroundScheduler()
     scheduler.add_job(
         fetch_and_write_briefing,
         IntervalTrigger(minutes=15),
-        next_run_time=datetime.now(),
+        next_run_time=datetime.now() + _startup_delay,
+    )
+    scheduler.add_job(
+        poll_groupme,
+        IntervalTrigger(minutes=20),
+        next_run_time=datetime.now() + _startup_delay,
+    )
+    scheduler.add_job(
+        analyze_patterns,
+        IntervalTrigger(days=1),
     )
     scheduler.start()
 
@@ -436,12 +1025,155 @@ async def get_weather(lat: float, lon: float):
 
 @app.get("/api/data")
 async def get_data():
-    if not BRIEFING_FILE.exists():
-        return JSONResponse({"status": "loading"})
+    data = _read_json(BRIEFING_FILE, {"status": "loading"})
+    return JSONResponse(data)
+
+
+@app.get("/api/checkin-status")
+async def get_checkin_status():
+    today      = datetime.now().date().isoformat()
+    log        = _read_json(DAILY_LOG_FILE, [])
+    done       = any(e.get("date") == today for e in log)
+    patterns   = _read_json(PATTERNS_FILE, {})
+
+    # Derive which questions Goose already knows the answer to with confidence.
+    # A field is "settled" if the last 7 entries all gave the same answer.
+    settled: dict = {}
+    if len(log) >= 7:
+        recent = log[-7:]
+        for field in ("out_time", "work_session", "focus_level"):
+            vals = [e.get(field) for e in recent if e.get(field)]
+            if len(vals) == 7 and len(set(vals)) == 1:
+                settled[field] = vals[0]
+
+    return JSONResponse({
+        "done":        done,
+        "today":       today,
+        "day_of_week": datetime.now().strftime("%A"),
+        "entries":     len(log),
+        "settled":     settled,       # fields Goose already knows — frontend skips these
+        "has_patterns": bool(patterns.get("derived")),
+    })
+
+
+@app.post("/api/checkin")
+async def post_checkin(request: Request):
+    body  = await request.json()
+    today = datetime.now().date().isoformat()
+
+    weather_snap = None
     try:
-        return JSONResponse(json.loads(BRIEFING_FILE.read_text()))
-    except (json.JSONDecodeError, OSError):
-        return JSONResponse({"status": "loading"})
+        w = fetch_weather()
+        weather_snap = {"temp_f": w["temp_f"], "condition": w["condition"]}
+    except Exception:
+        pass
+
+    log = _read_json(DAILY_LOG_FILE, [])
+    log = [e for e in log if e.get("date") != today]   # remove duplicate if re-submitted
+    log.append({
+        "date":         today,
+        "day_of_week":  datetime.now().strftime("%A"),
+        "went_out":     body.get("went_out"),
+        "out_time":     body.get("out_time"),
+        "work_session": body.get("work_session"),
+        "focus_level":  body.get("focus_level"),
+        "weather":      weather_snap,
+        "logged_at":    datetime.now(timezone.utc).isoformat(),
+    })
+    _write_json(DAILY_LOG_FILE, log)
+    return JSONResponse({"status": "ok", "total_entries": len(log)})
+
+
+@app.post("/api/feedback")
+async def post_feedback(request: Request):
+    body     = await request.json()
+    patterns = _read_json(PATTERNS_FILE, {})
+    feedback = patterns.get("feedback_log", [])
+    feedback.append({
+        "date":            datetime.now().date().isoformat(),
+        "day_of_week":     datetime.now().strftime("%A"),
+        "suggested_block": body.get("suggested_block"),
+        "accepted":        body.get("accepted", True),
+        "reason":          body.get("reason"),
+        "weather_temp":    body.get("weather_temp"),
+        "logged_at":       datetime.now(timezone.utc).isoformat(),
+    })
+    patterns["feedback_log"] = feedback
+    _write_json(PATTERNS_FILE, patterns)
+    return JSONResponse({"status": "ok"})
+
+
+@app.get("/api/patterns")
+async def get_patterns():
+    return JSONResponse(_read_json(PATTERNS_FILE, {}))
+
+
+@app.get("/api/flights")
+async def get_flights(lat: float = WEATHER_LAT, lon: float = WEATHER_LON):
+    """Return airborne aircraft near the given coordinates, with 30-second server-side cache."""
+    cache     = _read_json(FLIGHTS_CACHE_FILE, {})
+    cache_age = time.time() - cache.get("fetched_at", 0)
+    clat, clon = round(lat, 2), round(lon, 2)
+
+    if cache_age < 30 and cache.get("clat") == clat and cache.get("clon") == clon:
+        return JSONResponse(cache)
+
+    lamin = lat - FLIGHTS_BOX_DEG
+    lamax = lat + FLIGHTS_BOX_DEG
+    lomin = lon - FLIGHTS_BOX_DEG
+    lomax = lon + FLIGHTS_BOX_DEG
+
+    aircraft: list[dict] = []
+    try:
+        url = f"{OPENSKY_URL}?lamin={lamin}&lomin={lomin}&lamax={lamax}&lomax={lomax}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Goose/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+
+        for sv in (data.get("states") or []):
+            # sv indices: 0=icao, 1=callsign, 5=lon, 6=lat,
+            #             7=baro_alt(m), 8=on_ground, 9=vel(m/s), 10=heading
+            if sv[8]:                        continue   # skip ground vehicles
+            if sv[5] is None or sv[6] is None: continue  # no position
+
+            dist = ((sv[6] - lat) ** 2 + (sv[5] - lon) ** 2) ** 0.5
+            aircraft.append({
+                "icao":     sv[0],
+                "callsign": (sv[1] or "").strip() or sv[0].upper(),
+                "lat":      sv[6],
+                "lon":      sv[5],
+                "alt_ft":   round(sv[7] * 3.28084) if sv[7] else None,
+                "speed_kt": round(sv[9] * 1.94384) if sv[9] else None,
+                "heading":  sv[10] or 0,
+                "dist_deg": round(dist, 4),
+            })
+
+        # Sort by distance, cap at 40 aircraft
+        aircraft.sort(key=lambda a: a["dist_deg"])
+        aircraft = aircraft[:40]
+
+    except urllib.error.HTTPError as e:
+        _log.warning("get_flights HTTP error: %s", e)
+    except Exception as e:
+        _log.warning("get_flights failed: %s", e)
+
+    result = {
+        "aircraft":   aircraft,
+        "count":      len(aircraft),
+        "clat":       clat,
+        "clon":       clon,
+        "box_deg":    FLIGHTS_BOX_DEG,
+        "fetched_at": time.time(),
+    }
+    _write_json(FLIGHTS_CACHE_FILE, result)
+    return JSONResponse(result)
+
+
+@app.get("/api/groupme")
+async def get_groupme():
+    """Return latest GroupMe summary, detected events, and poll metadata."""
+    data = _read_json(GROUPME_STATE_FILE, {"summary": None, "events": [], "last_check": None})
+    return JSONResponse(data)
 
 
 @app.post("/api/chat")
@@ -456,16 +1188,39 @@ async def chat(request: Request):
         except Exception:
             pass
 
+    groupme: dict = {}
+    if GROUPME_STATE_FILE.exists():
+        try:
+            groupme = json.loads(GROUPME_STATE_FILE.read_text())
+        except Exception:
+            pass
+
+    patterns: dict = _read_json(PATTERNS_FILE, {})
+    context:  dict = _read_json(CONTEXT_FILE,  {})
+
     local_now = datetime.now().strftime("%A, %B %d, %Y %I:%M %p")
 
-    system_prompt = f"""You are Goose, a personal AI co-pilot. Today is {local_now}.
+    system_prompt = f"""You are Goose, a personal AI co-pilot for Jackson. Today is {local_now}.
 
-Live briefing data:
+You have access to everything currently displayed on Jackson's dashboard:
+
+--- ACADEMIC BRIEFING ---
 {json.dumps(briefing, indent=2)}
 
-Your job: give sharp, tactical answers. Reference specific assignments, times, \
-and free blocks from the briefing when relevant. Keep replies under 120 words \
-unless the user asks for more detail. No fluff."""
+--- FRATERNITY GROUP CHAT (GroupMe · read-only observer) ---
+{json.dumps(groupme, indent=2)}
+
+--- CURRENT LIFE CONTEXT ---
+{json.dumps(context, indent=2)}
+
+--- LEARNED BEHAVIORAL PATTERNS ---
+{json.dumps(patterns.get("derived", "Not enough data yet — check-in more days to unlock"), indent=2)}
+
+Your job: answer conversationally and specifically. Reference real names, times, \
+assignments, and events from the data above when relevant. Keep replies concise \
+(under 150 words) unless asked for more detail. When asked about the group chat, \
+draw from the summary and detected events. Speak like a person, not a robot — \
+this will become voice-activated so keep responses natural and speakable."""
 
     def generate():
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)

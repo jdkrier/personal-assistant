@@ -427,6 +427,325 @@
       z-index: 0;
     }
 
+    /* ── DAILY CHECK-IN ────────────────────────────────────────────────────── */
+    #checkin-card {
+      position: relative;
+      background: rgba(255,170,0,0.04);
+      border: 1px solid rgba(255,170,0,0.35);
+      padding: 24px 28px 20px;
+      margin-bottom: 40px;
+      display: none;
+    }
+    #checkin-card.visible { display: block; }
+
+    #checkin-card::before { content:''; position:absolute; top:-1px; left:-1px; width:14px; height:14px; border-top:2px solid var(--amber); border-left:2px solid var(--amber); }
+    #checkin-card::after  { content:''; position:absolute; bottom:-1px; right:-1px; width:14px; height:14px; border-bottom:2px solid var(--amber); border-right:2px solid var(--amber); }
+
+    .checkin-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .checkin-title {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--amber);
+    }
+    #checkin-skip {
+      background: none;
+      border: none;
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      color: var(--text-dim);
+      cursor: pointer;
+      padding: 0;
+    }
+    #checkin-skip:hover { color: var(--text); }
+
+    .checkin-q {
+      margin-bottom: 16px;
+    }
+    .checkin-q-label {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      color: var(--text);
+      text-transform: uppercase;
+      margin-bottom: 9px;
+    }
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .chip {
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      padding: 6px 14px;
+      border: 1px solid var(--border);
+      color: var(--text);
+      background: none;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+      clip-path: polygon(6px 0%, 100% 0%, calc(100% - 6px) 100%, 0% 100%);
+    }
+    .chip:hover { border-color: var(--amber); color: var(--amber); }
+    .chip.selected {
+      border-color: var(--amber);
+      color: var(--amber);
+      background: rgba(255,170,0,0.08);
+    }
+
+    .checkin-footer {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+    #checkin-submit {
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      padding: 8px 20px;
+      background: rgba(255,170,0,0.08);
+      border: 1px solid var(--amber);
+      color: var(--amber);
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    #checkin-submit:hover { background: rgba(255,170,0,0.18); }
+    #checkin-submit:disabled { opacity: 0.35; cursor: default; }
+
+    #checkin-done {
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      color: var(--green);
+      display: none;
+    }
+
+    /* ── HEADLINE FEEDBACK ──────────────────────────────────────────────────── */
+    #headline-feedback {
+      margin-top: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .feedback-btns {
+      display: flex;
+      gap: 10px;
+    }
+    .fb-btn {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      padding: 7px 16px;
+      background: none;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      clip-path: polygon(6px 0%, 100% 0%, calc(100% - 6px) 100%, 0% 100%);
+    }
+    #fb-accept {
+      border: 1px solid rgba(0,255,153,0.4);
+      color: var(--green);
+    }
+    #fb-accept:hover { background: rgba(0,255,153,0.08); }
+    #fb-reject {
+      border: 1px solid rgba(255,51,85,0.4);
+      color: var(--red);
+    }
+    #fb-reject:hover { background: rgba(255,51,85,0.08); }
+
+    #feedback-reasons {
+      display: none;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    #feedback-reasons.visible { display: flex; }
+
+    .reason-chip {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      padding: 5px 13px;
+      border: 1px solid var(--border);
+      color: var(--text);
+      background: none;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+      clip-path: polygon(5px 0%, 100% 0%, calc(100% - 5px) 100%, 0% 100%);
+    }
+    .reason-chip:hover { border-color: var(--red); color: var(--red); }
+
+    #feedback-logged {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      color: var(--text-dim);
+      display: none;
+    }
+
+    /* ── SITREP — amber / original Top Gun palette ─────────────────────────── */
+    .sitrep-grid {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 24px;
+      align-items: start;
+    }
+    @media (max-width: 900px) { .sitrep-grid { grid-template-columns: 1fr; } }
+
+    /* amber corner brackets override */
+    .panel-amber::before { border-color: var(--amber); }
+    .panel-amber::after  { border-color: var(--amber); }
+    .panel-amber .c-tr   { border-top-color: var(--amber); border-right-color: var(--amber); }
+    .panel-amber .c-bl   { border-bottom-color: var(--amber); border-left-color: var(--amber); }
+
+    .amber-label { color: var(--amber) !important; }
+    .amber-label::after { background: rgba(255,170,0,0.15) !important; }
+
+    .sitrep-summary {
+      font-size: 14px;
+      font-weight: 400;
+      color: var(--text);
+      line-height: 1.75;
+      padding-bottom: 20px;
+    }
+
+    .sitrep-meta {
+      display: flex;
+      gap: 24px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-dim);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .sitrep-event-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .sitrep-event-row:last-child { border-bottom: none; }
+
+    .sitrep-event-info { flex: 1; min-width: 0; }
+    .sitrep-event-title {
+      font-size: 14px;
+      color: var(--text-hi);
+      line-height: 1.35;
+      margin-bottom: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .sitrep-event-sub {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-dim);
+      letter-spacing: .06em;
+      margin-top: 2px;
+    }
+
+    .cal-badge {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 3px 9px;
+      border: 1px solid;
+      flex-shrink: 0;
+      margin-top: 2px;
+      white-space: nowrap;
+    }
+    .cal-added   { color: var(--green);   border-color: var(--green);  background: rgba(0,255,153,.06); }
+    .cal-past    { color: var(--text-dim); border-color: var(--border); }
+    .cal-pending { color: var(--amber);   border-color: var(--amber);  background: rgba(255,170,0,.06); }
+
+    /* ── PRIORITY TRANSMISSION (pinned messages) ───────────────────────────── */
+    #priority-panel {
+      display: none;
+      margin-bottom: 28px;
+      position: relative;
+      background: rgba(255,51,85,0.04);
+      border: 1px solid var(--red);
+      padding: 24px 28px;
+      animation: pulse-border 2.4s ease-in-out infinite;
+    }
+    #priority-panel.has-pins { display: block; }
+
+    @keyframes pulse-border {
+      0%,100% { box-shadow: 0 0 0 0 rgba(255,51,85,0); border-color: rgba(255,51,85,0.9); }
+      50%      { box-shadow: 0 0 22px 2px rgba(255,51,85,0.18); border-color: rgba(255,51,85,0.5); }
+    }
+
+    /* red corner brackets */
+    #priority-panel::before { content:''; position:absolute; top:-1px; left:-1px; width:16px; height:16px; border-top:2px solid var(--red); border-left:2px solid var(--red); }
+    #priority-panel::after  { content:''; position:absolute; bottom:-1px; right:-1px; width:16px; height:16px; border-bottom:2px solid var(--red); border-right:2px solid var(--red); }
+    #priority-panel .c-tr   { position:absolute; top:-1px; right:-1px; width:16px; height:16px; border-top:2px solid var(--red); border-right:2px solid var(--red); }
+    #priority-panel .c-bl   { position:absolute; bottom:-1px; left:-1px; width:16px; height:16px; border-bottom:2px solid var(--red); border-left:2px solid var(--red); }
+
+    .priority-label {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--red);
+      margin-bottom: 18px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .priority-label .blink-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--red);
+      box-shadow: 0 0 8px var(--red);
+      animation: breathe-red 1.2s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+    @keyframes breathe-red {
+      0%,100% { opacity:1; box-shadow: 0 0 8px var(--red); }
+      50%      { opacity:.25; box-shadow: 0 0 3px var(--red); }
+    }
+    .priority-label::after { content:''; flex:1; height:1px; background: rgba(255,51,85,0.25); }
+
+    .pin-row {
+      display: flex;
+      gap: 16px;
+      padding: 14px 0;
+      border-bottom: 1px solid rgba(255,51,85,0.15);
+      align-items: flex-start;
+    }
+    .pin-row:last-child { border-bottom: none; }
+
+    .pin-badge {
+      font-family: var(--mono);
+      font-size: 9px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border: 1px solid var(--red);
+      color: var(--red);
+      background: rgba(255,51,85,0.08);
+      flex-shrink: 0;
+      margin-top: 3px;
+    }
+
+    .pin-info { flex: 1; min-width: 0; }
+    .pin-sender { font-family: var(--mono); font-size: 11px; color: var(--red); letter-spacing: .1em; text-transform: uppercase; margin-bottom: 5px; }
+    .pin-text   { font-size: 14px; color: var(--text-hi); line-height: 1.55; }
+    .pin-time   { font-family: var(--mono); font-size: 10px; color: var(--text-dim); letter-spacing: .08em; margin-top: 5px; }
+
     /* ── CHAT PANEL ──────────────────────────────────────────────────────── */
     #chat-toggle {
       position: fixed;
@@ -629,6 +948,57 @@
 <!-- HERO: Mission Brief -->
 <section class="section" id="hero-section">
   <div class="hero-eyebrow reveal">Mission Brief</div>
+
+  <!-- Daily check-in card -->
+  <div id="checkin-card" class="reveal">
+    <div class="checkin-header">
+      <div class="checkin-title">◆ Daily Log — Last Night</div>
+      <button id="checkin-skip">Skip →</button>
+    </div>
+
+    <div class="checkin-q">
+      <div class="checkin-q-label">Did you go out last night?</div>
+      <div class="chip-row" id="chips-out">
+        <button class="chip" data-q="went_out" data-v="yes">Yes</button>
+        <button class="chip" data-q="went_out" data-v="no">No</button>
+      </div>
+    </div>
+
+    <div class="checkin-q" id="q-out-time" style="display:none">
+      <div class="checkin-q-label">What time did you head out?</div>
+      <div class="chip-row">
+        <button class="chip" data-q="out_time" data-v="9_10pm">9–10pm</button>
+        <button class="chip" data-q="out_time" data-v="10_11pm">10–11pm</button>
+        <button class="chip" data-q="out_time" data-v="11pm_12am">11pm–12am</button>
+        <button class="chip" data-q="out_time" data-v="after_midnight">After midnight</button>
+      </div>
+    </div>
+
+    <div class="checkin-q">
+      <div class="checkin-q-label">When did you get work done?</div>
+      <div class="chip-row">
+        <button class="chip" data-q="work_session" data-v="morning">Morning</button>
+        <button class="chip" data-q="work_session" data-v="afternoon">Afternoon</button>
+        <button class="chip" data-q="work_session" data-v="evening">Evening</button>
+        <button class="chip" data-q="work_session" data-v="barely">Barely</button>
+      </div>
+    </div>
+
+    <div class="checkin-q">
+      <div class="checkin-q-label">How focused were you?</div>
+      <div class="chip-row">
+        <button class="chip" data-q="focus_level" data-v="locked_in">Locked in</button>
+        <button class="chip" data-q="focus_level" data-v="decent">Decent</button>
+        <button class="chip" data-q="focus_level" data-v="scattered">Scattered</button>
+      </div>
+    </div>
+
+    <div class="checkin-footer">
+      <span id="checkin-done">✓ Logged</span>
+      <button id="checkin-submit" disabled>Log it →</button>
+    </div>
+  </div>
+
   <div id="brief" class="reveal" style="transition-delay:0.1s"></div>
   <div class="scroll-hint" id="scroll-hint">Scroll</div>
 </section>
@@ -651,6 +1021,37 @@
       <div class="c-tr"></div><div class="c-bl"></div>
       <div class="panel-label">Free Blocks</div>
       <div id="blocks" class="stagger"></div>
+    </div>
+  </div>
+</section>
+
+<!-- SITREP: GroupMe Intel -->
+<section class="section" id="sitrep-section">
+  <div class="section-eyebrow reveal">Sitrep · Comms Intel</div>
+
+  <!-- Priority panel — hidden until pinned messages exist -->
+  <div id="priority-panel" class="reveal">
+    <div class="c-tr"></div><div class="c-bl"></div>
+    <div class="priority-label">
+      <span class="blink-dot"></span>
+      Priority Transmission — Pinned
+    </div>
+    <div id="priority-pins"></div>
+  </div>
+
+  <div class="sitrep-grid">
+    <div class="panel panel-amber reveal from-left" style="transition-delay:0.05s">
+      <div class="c-tr"></div><div class="c-bl"></div>
+      <div class="panel-label amber-label">GroupMe · Last Transmission</div>
+      <div id="sitrep-summary" class="sitrep-summary">
+        <span style="color:var(--text-dim);font-family:var(--mono);font-size:12px;letter-spacing:.16em">AWAITING INTEL_</span>
+      </div>
+      <div id="sitrep-meta" class="sitrep-meta"></div>
+    </div>
+    <div class="panel panel-amber reveal from-right" style="transition-delay:0.2s">
+      <div class="c-tr"></div><div class="c-bl"></div>
+      <div class="panel-label amber-label">Detected Events</div>
+      <div id="sitrep-events"></div>
     </div>
   </div>
 </section>
@@ -744,6 +1145,30 @@
   function render(data) {
     const dot = $('sys-dot'), lbl = $('sys-label');
 
+    // Schedule change alert
+    let alertBanner = document.getElementById('schedule-alert-banner');
+    if (data.schedule_alert) {
+      if (!alertBanner) {
+        alertBanner = document.createElement('div');
+        alertBanner.id = 'schedule-alert-banner';
+        alertBanner.style.cssText = `
+          position:sticky;top:57px;z-index:99;
+          background:rgba(255,170,0,0.07);
+          border-bottom:1px solid rgba(255,170,0,0.35);
+          padding:10px 40px;
+          font-family:var(--mono);font-size:12px;
+          color:var(--amber);letter-spacing:.1em;
+          display:flex;align-items:center;gap:12px;
+        `;
+        document.body.insertBefore(alertBanner, document.querySelector('section'));
+      }
+      alertBanner.innerHTML = `<span>◆</span><span>${esc(data.schedule_alert)}</span>
+        <button onclick="this.parentElement.style.display='none'" style="
+          margin-left:auto;background:none;border:none;color:var(--amber);
+          font-family:var(--mono);font-size:11px;cursor:pointer;opacity:.6
+        ">[ dismiss ]</button>`;
+    }
+
     if (data.status === 'loading') {
       dot.className = 'status-dot warn';
       lbl.textContent = 'Initializing';
@@ -763,7 +1188,22 @@
         <div class="readouts">
           ${h.priority_task   ? `<div class="readout"><div class="readout-label">Priority Target</div><div class="readout-value">${esc(h.priority_task)}</div></div>` : ''}
           ${h.suggested_block ? `<div class="readout"><div class="readout-label">Suggested Window</div><div class="readout-value">${esc(h.suggested_block)}</div></div>` : ''}
+        </div>
+        <div id="headline-feedback">
+          <div class="feedback-btns">
+            <button class="fb-btn" id="fb-accept">✓ Works for me</button>
+            <button class="fb-btn" id="fb-reject">✗ Not happening</button>
+          </div>
+          <div id="feedback-reasons">
+            <button class="reason-chip" data-reason="going_out_early">Going out early</button>
+            <button class="reason-chip" data-reason="already_done">Already did it</button>
+            <button class="reason-chip" data-reason="need_a_break">Need a break</button>
+            <button class="reason-chip" data-reason="nice_weather">Weather's too nice</button>
+            <button class="reason-chip" data-reason="something_came_up">Something came up</button>
+          </div>
+          <div id="feedback-logged"></div>
         </div>`;
+      initFeedback(h.suggested_block, data.weather?.temp_f);
     } else {
       $('brief').innerHTML = `<div class="loading-state"><p>Computing recommendation_</p></div>`;
     }
@@ -833,6 +1273,161 @@
 
   poll();
   setInterval(poll, 60_000);
+
+  // ── DAILY CHECK-IN ─────────────────────────────────────────────────────────
+  (function () {
+    const card    = $('checkin-card');
+    const submit  = $('checkin-submit');
+    const doneMsg = $('checkin-done');
+    const answers = {};
+
+    // Check if already done today (localStorage fast-path, then server confirm)
+    const todayKey = 'checkin_' + new Date().toISOString().slice(0, 10);
+    if (localStorage.getItem(todayKey)) return;
+
+    const FIELD_LABELS = {
+      out_time:     { before: 'What time did you head out?', after: null },
+      work_session: { before: 'When did you get work done?', after: null },
+      focus_level:  { before: 'How focused were you?',       after: null },
+    };
+    const SETTLED_LABELS = {
+      '9_10pm':      '9–10pm',   '10_11pm':     '10–11pm',
+      '11pm_12am':   '11pm–12am','after_midnight':'After midnight',
+      morning:       'Morning',  afternoon:     'Afternoon',
+      evening:       'Evening',  barely:        'Barely',
+      locked_in:     'Locked in',decent:        'Decent',
+      scattered:     'Scattered',
+    };
+
+    fetch('/api/checkin-status').then(r => r.json()).then(s => {
+      if (s.done) { localStorage.setItem(todayKey, '1'); return; }
+
+      // Pre-fill and hide questions Goose already knows with confidence
+      const settled = s.settled || {};
+      Object.entries(settled).forEach(([field, val]) => {
+        answers[field] = val;   // pre-fill answer
+        // Find the question block containing a chip with this data-q and hide it
+        const chip = card.querySelector(`.chip[data-q="${field}"][data-v="${val}"]`);
+        if (chip) {
+          const qBlock = chip.closest('.checkin-q');
+          if (qBlock) {
+            const lbl = qBlock.querySelector('.checkin-q-label');
+            const label = SETTLED_LABELS[val] || val;
+            // Replace with a compact "already know" line
+            qBlock.innerHTML = `<div class="checkin-q-label" style="color:var(--text-dim)">
+              ${lbl ? lbl.textContent : field} — <span style="color:var(--green)">${label} (learned)</span>
+            </div>`;
+          }
+        }
+      });
+
+      card.classList.add('visible');
+      // Re-evaluate submit button since some answers may be pre-filled
+      const required = answers.went_out && answers.work_session && answers.focus_level;
+      submit.disabled = !required;
+    }).catch(() => {});
+
+    // Chip selection
+    document.addEventListener('click', e => {
+      const chip = e.target.closest('.chip');
+      if (!chip || !card.contains(chip)) return;
+
+      const q = chip.dataset.q;
+      const v = chip.dataset.v;
+
+      // Deselect siblings
+      chip.closest('.chip-row').querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
+      chip.classList.add('selected');
+      answers[q] = v;
+
+      // Show out-time question when "yes" to going out
+      if (q === 'went_out') {
+        $('q-out-time').style.display = v === 'yes' ? 'block' : 'none';
+        if (v === 'no') delete answers['out_time'];
+      }
+
+      // Enable submit if required fields answered
+      const required = answers.went_out && answers.work_session && answers.focus_level;
+      submit.disabled = !required;
+    });
+
+    // Submit
+    submit.addEventListener('click', async () => {
+      submit.disabled = true;
+      try {
+        await fetch('/api/checkin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(answers),
+        });
+        doneMsg.style.display = 'block';
+        submit.style.display  = 'none';
+        localStorage.setItem(todayKey, '1');
+        setTimeout(() => {
+          card.style.transition = 'opacity 0.6s, max-height 0.6s';
+          card.style.opacity = '0';
+          card.style.maxHeight = '0';
+          card.style.overflow = 'hidden';
+          card.style.marginBottom = '0';
+          card.style.padding = '0';
+        }, 800);
+      } catch {
+        submit.disabled = false;
+      }
+    });
+
+    // Skip
+    $('checkin-skip').addEventListener('click', () => {
+      localStorage.setItem(todayKey, '1');
+      card.style.display = 'none';
+    });
+  })();
+  // ── END CHECK-IN ───────────────────────────────────────────────────────────
+
+  // ── HEADLINE FEEDBACK ──────────────────────────────────────────────────────
+  function initFeedback(suggestedBlock, weatherTemp) {
+    const acceptBtn  = $('fb-accept');
+    const rejectBtn  = $('fb-reject');
+    const reasonsDiv = $('feedback-reasons');
+    const loggedDiv  = $('feedback-logged');
+    if (!acceptBtn) return;
+
+    async function sendFeedback(accepted, reason) {
+      try {
+        await fetch('/api/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accepted, reason: reason || null, suggested_block: suggestedBlock, weather_temp: weatherTemp }),
+        });
+      } catch {}
+    }
+
+    function showLogged(msg) {
+      acceptBtn.style.display  = 'none';
+      rejectBtn.style.display  = 'none';
+      reasonsDiv.classList.remove('visible');
+      loggedDiv.style.display  = 'block';
+      loggedDiv.textContent    = msg;
+    }
+
+    acceptBtn.addEventListener('click', () => {
+      sendFeedback(true, null);
+      showLogged('✓ Got it — noted.');
+    });
+
+    rejectBtn.addEventListener('click', () => {
+      reasonsDiv.classList.add('visible');
+      rejectBtn.style.display = 'none';
+    });
+
+    reasonsDiv.addEventListener('click', e => {
+      const chip = e.target.closest('.reason-chip');
+      if (!chip) return;
+      sendFeedback(false, chip.dataset.reason);
+      showLogged('✓ Got it — logged. Will factor this in.');
+    });
+  }
+  // ── END HEADLINE FEEDBACK ──────────────────────────────────────────────────
 
   // ── GEOLOCATION WEATHER ────────────────────────────────────────────────────
   // Ask for current location and refresh the ATMOS bar with local conditions.
@@ -1124,12 +1719,233 @@
         jet.draw(ctx, now);
       }
 
+      // Draw real aircraft underneath the animated jets
+      if (window._radarFrame) window._radarFrame(ctx, canvas);
+
       requestAnimationFrame(loop);
     }
 
     requestAnimationFrame(loop);
   })();
   // ── END JET ANIMATION ──────────────────────────────────────────────────────
+</script>
+
+<script>
+  // ── LIVE FLIGHT RADAR ──────────────────────────────────────────────────────
+  (function () {
+    let flightData  = null;
+    let userLat     = 33.4255;   // fallback: ASU Tempe
+    let userLon     = -111.9400;
+    let radarSweep  = 0;         // sweep angle in radians
+
+    // Use geolocation if available (reuse same coords as weather)
+    if ('geolocation' in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        pos => { userLat = pos.coords.latitude; userLon = pos.coords.longitude; fetchFlights(); },
+        ()  => fetchFlights(),
+        { timeout: 6000, maximumAge: 300_000 }
+      );
+    } else {
+      fetchFlights();
+    }
+
+    async function fetchFlights() {
+      try {
+        const d = await (await fetch(`/api/flights?lat=${userLat}&lon=${userLon}`)).json();
+        flightData = d;
+      } catch {}
+    }
+    setInterval(fetchFlights, 30_000);
+
+    // Expose draw function to the jet animation loop
+    window._radarFrame = function (ctx, canvas) {
+      const W = canvas.width, H = canvas.height;
+
+      // Advance sweep
+      radarSweep = (radarSweep + 0.008) % (Math.PI * 2);
+
+      // Radar sweep line — subtle green, originates from screen centre
+      const cx = W / 2, cy = H / 2;
+      const sweepLen = Math.max(W, H);
+      ctx.save();
+      const sweepGrad = ctx.createLinearGradient(
+        cx, cy,
+        cx + Math.cos(radarSweep) * sweepLen,
+        cy + Math.sin(radarSweep) * sweepLen
+      );
+      sweepGrad.addColorStop(0,   'rgba(0,255,120,0.10)');
+      sweepGrad.addColorStop(0.4, 'rgba(0,255,120,0.04)');
+      sweepGrad.addColorStop(1,   'rgba(0,255,120,0)');
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, sweepLen, radarSweep - 0.45, radarSweep, false);
+      ctx.closePath();
+      ctx.fillStyle = sweepGrad;
+      ctx.fill();
+      ctx.restore();
+
+      if (!flightData?.aircraft?.length) return;
+
+      const boxDeg = flightData.box_deg;
+      const clat   = flightData.clat;
+      const clon   = flightData.clon;
+
+      ctx.save();
+      ctx.font      = '8px SF Mono, Fira Code, monospace';
+      ctx.textAlign = 'left';
+
+      for (const ac of flightData.aircraft) {
+        // Map geo → screen (centre = user location)
+        const sx = W / 2 + (ac.lon - clon) / boxDeg * (W * 0.88);
+        const sy = H / 2 - (ac.lat - clat) / boxDeg * (H * 0.88);
+
+        if (sx < -30 || sx > W + 30 || sy < -30 || sy > H + 30) continue;
+
+        // Heading: OpenSky gives degrees clockwise from north → canvas angle
+        const headRad = (ac.heading - 90) * Math.PI / 180;
+
+        // Proximity to sweep line → brief "ping" glow
+        let angleDiff = Math.abs(((Math.atan2(sy - cy, sx - cx) - radarSweep) + Math.PI * 3) % (Math.PI * 2) - Math.PI);
+        const pingStr = Math.max(0, 1 - angleDiff / 0.5);
+        const baseA   = 0.35 + pingStr * 0.55;
+
+        // Draw aircraft blip — tiny arrow pointing in heading direction
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.rotate(headRad);
+
+        ctx.shadowColor = `rgba(0,200,120,${0.3 + pingStr * 0.5})`;
+        ctx.shadowBlur  = 4 + pingStr * 8;
+        ctx.fillStyle   = `rgba(140,220,180,${baseA})`;
+
+        ctx.beginPath();
+        ctx.moveTo( 5,  0);
+        ctx.lineTo(-3, -2.5);
+        ctx.lineTo(-2,  0);
+        ctx.lineTo(-3,  2.5);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+
+        // Callsign
+        ctx.fillStyle = `rgba(140,220,180,${baseA * 0.7})`;
+        ctx.shadowColor = 'transparent';
+        ctx.fillText(ac.callsign, sx + 8, sy - 2);
+
+        // Altitude (hundreds of feet, e.g. "FL320" style)
+        if (ac.alt_ft) {
+          ctx.fillStyle = `rgba(140,220,180,${baseA * 0.4})`;
+          const fl = Math.round(ac.alt_ft / 100);
+          ctx.fillText(`FL${fl}`, sx + 8, sy + 9);
+        }
+      }
+      ctx.restore();
+    };
+  })();
+  // ── END FLIGHT RADAR ───────────────────────────────────────────────────────
+</script>
+
+<script>
+  // ── SITREP (GroupMe Intel) ──────────────────────────────────────────────────
+  (function () {
+    function renderSitrep(data) {
+      const summaryEl = $('sitrep-summary');
+      const metaEl    = $('sitrep-meta');
+      const eventsEl  = $('sitrep-events');
+      if (!data) return;
+
+      // Summary text
+      if (data.caught_up) {
+        summaryEl.innerHTML = `<span style="color:var(--green);font-family:var(--mono);font-size:13px;letter-spacing:.1em">✓ You're all caught up.</span>`;
+      } else if (data.summary) {
+        summaryEl.textContent = data.summary;
+      }
+
+      // Meta row — last check time + message count
+      const parts = [];
+      if (data.last_check) {
+        const d = new Date(data.last_check);
+        parts.push(`Last check: ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`);
+      }
+      if (data.new_message_count) {
+        parts.push(`${data.new_message_count} new messages`);
+      }
+      metaEl.textContent = parts.join('  ·  ');
+
+      // Events list
+      const evtList = data.events || [];
+      const added   = data.events_added_to_calendar || [];
+      const today   = new Date(); today.setHours(0,0,0,0);
+
+      if (!evtList.length) {
+        eventsEl.innerHTML = `<div class="empty">No events detected</div>`;
+        return;
+      }
+
+      eventsEl.innerHTML = evtList.map(ev => {
+        const evDate   = ev.date ? new Date(ev.date + 'T00:00:00') : null;
+        const isPast   = evDate && evDate < today;
+        const wasAdded = added.includes(ev.title);
+
+        let badgeCls, badgeTxt;
+        if (isPast)      { badgeCls = 'cal-past';    badgeTxt = 'Past'; }
+        else if (wasAdded){ badgeCls = 'cal-added';  badgeTxt = 'Cal Added'; }
+        else              { badgeCls = 'cal-pending'; badgeTxt = 'Detected'; }
+
+        const dateLine = [ev.date, ev.time ? ev.time.slice(0,5) : ''].filter(Boolean).join(' · ');
+
+        return `<div class="sitrep-event-row">
+          <div class="cal-badge ${badgeCls}">${badgeTxt}</div>
+          <div class="sitrep-event-info">
+            <div class="sitrep-event-title">${esc(ev.title)}</div>
+            ${dateLine ? `<div class="sitrep-event-sub">${esc(dateLine)}</div>` : ''}
+            ${ev.description ? `<div class="sitrep-event-sub" style="opacity:.55">${esc(ev.description)}</div>` : ''}
+          </div>
+        </div>`;
+      }).join('');
+
+      // Re-observe stagger containers for new content
+      document.querySelectorAll('#sitrep-section .stagger').forEach(el => {
+        el.classList.remove('visible');
+        io.observe(el);
+      });
+    }
+
+    function renderPinned(pins) {
+      const panel = $('priority-panel');
+      const container = $('priority-pins');
+      if (!pins || !pins.length) {
+        panel.classList.remove('has-pins');
+        return;
+      }
+      panel.classList.add('has-pins');
+      container.innerHTML = pins.map(p => {
+        const ts = p.pinned_at
+          ? new Date(p.pinned_at * 1000).toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })
+          : '';
+        return `<div class="pin-row">
+          <div class="pin-badge">Pinned</div>
+          <div class="pin-info">
+            <div class="pin-sender">${esc(p.name)}</div>
+            <div class="pin-text">${esc(p.text)}</div>
+            ${ts ? `<div class="pin-time">Pinned ${ts}</div>` : ''}
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    async function pollGroupMe() {
+      try {
+        const data = await (await fetch('/api/groupme')).json();
+        renderPinned(data.pinned || []);
+        renderSitrep(data);
+      } catch {}
+    }
+
+    pollGroupMe();
+    setInterval(pollGroupMe, 5 * 60 * 1000);   // refresh every 5 min
+  })();
+  // ── END SITREP ──────────────────────────────────────────────────────────────
 </script>
 
 <!-- ── CHAT PANEL ─────────────────────────────────────────────────────── -->
