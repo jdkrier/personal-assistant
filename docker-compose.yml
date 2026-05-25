@@ -1,0 +1,19 @@
+services:
+  goose:
+    build: .
+    container_name: goose
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # Persistent data: briefing, tokens, logs, patterns, GroupMe state
+      - goose_data:/data
+      # Mount credentials.json read-only (generated once via Google OAuth setup)
+      - ./credentials.json:/data/credentials.json:ro
+    env_file:
+      - .env
+    environment:
+      - DATA_DIR=/data
+
+volumes:
+  goose_data:

@@ -1,0 +1,13 @@
+.git
+.env
+*.pyc
+__pycache__/
+.pytest_cache/
+tests/
+.DS_Store
+*.md
+*.plist
+setup.py
+credentials.json
+token.json
+*.json.tmp

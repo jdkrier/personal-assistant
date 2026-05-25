@@ -28,14 +28,13 @@ from icalendar import Calendar
 
 BASE_DIR = Path(__file__).parent.resolve()
 
-# Runtime data lives OUTSIDE the Desktop/iCloud-synced project directory.
-# iCloud evicts infrequently-accessed files to the cloud (dataless flag), and
-# when the LaunchAgent process re-hydrates them it IPC-blocks with the cloudkit
-# daemon, causing EDEADLK.  ~/.goose/data/ is never iCloud-synced.
-DATA_DIR = Path.home() / ".goose" / "data"
+# DATA_DIR: where all runtime JSON and static files live.
+# - macOS LaunchAgent: defaults to ~/.goose/data/ (outside iCloud Desktop)
+# - Docker:            set DATA_DIR=/data in the container environment
+DATA_DIR = Path(os.environ.get("DATA_DIR", str(Path.home() / ".goose" / "data")))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# Env vars are injected by the LaunchAgent plist (EnvironmentVariables key).
+# Env vars are injected by the LaunchAgent plist or Docker env_file.
 # For manual runs, export them in your shell first or copy .env to your session.
 
 CANVAS_ICAL_URL = os.environ["CANVAS_ICAL_URL"]
