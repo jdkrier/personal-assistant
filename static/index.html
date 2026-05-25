@@ -1042,7 +1042,10 @@
   <div class="sitrep-grid">
     <div class="panel panel-amber reveal from-left" style="transition-delay:0.05s">
       <div class="c-tr"></div><div class="c-bl"></div>
-      <div class="panel-label amber-label">GroupMe · Last Transmission</div>
+      <div class="panel-label amber-label" style="display:flex;align-items:center;justify-content:space-between">
+        <span>GroupMe · Last Transmission</span>
+        <button id="sitrep-refresh-btn" title="Re-poll GroupMe now" onclick="refreshSitrep()" style="background:none;border:1px solid #c8922255;color:#c89222;font-family:var(--mono);font-size:10px;letter-spacing:.1em;padding:2px 8px;border-radius:3px;cursor:pointer;transition:background .15s">↻ REFRESH</button>
+      </div>
       <div id="sitrep-summary" class="sitrep-summary">
         <span style="color:var(--text-dim);font-family:var(--mono);font-size:12px;letter-spacing:.16em">AWAITING INTEL_</span>
       </div>
@@ -1942,6 +1945,23 @@
       } catch {}
     }
 
+    window.refreshSitrep = async function () {
+      const btn = $('sitrep-refresh-btn');
+      const summaryEl = $('sitrep-summary');
+      btn.disabled = true;
+      btn.textContent = '↻ POLLING…';
+      summaryEl.innerHTML = `<span style="color:var(--text-dim);font-family:var(--mono);font-size:12px;letter-spacing:.16em">RE-POLLING COMMS_</span>`;
+      try {
+        // Tell the server to do a fresh GroupMe fetch right now
+        await fetch('/api/groupme/refresh', { method: 'POST' });
+        // Give it a moment to process, then reload the display
+        await new Promise(r => setTimeout(r, 2500));
+        await pollGroupMe();
+      } catch {}
+      btn.textContent = '↻ REFRESH';
+      btn.disabled = false;
+    };
+
     pollGroupMe();
     setInterval(pollGroupMe, 5 * 60 * 1000);   // refresh every 5 min
   })();
@@ -2092,6 +2112,260 @@
     }
   })();
   // ── END CHAT ───────────────────────────────────────────────────────────────
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SPOTIFY NOW-PLAYING BAR
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<div id="spotify-bar">
+  <div id="sp-art-wrap">
+    <img id="sp-art" src="" alt="" />
+    <div id="sp-art-placeholder">♪</div>
+  </div>
+  <div id="sp-info">
+    <div id="sp-track">—</div>
+    <div id="sp-artist"></div>
+  </div>
+  <div id="sp-controls">
+    <button class="sp-btn" id="sp-prev"  title="Previous" onclick="spControl('prev')">&#9664;&#9664;</button>
+    <button class="sp-btn" id="sp-play"  title="Play/Pause" onclick="spControl('play_pause')">&#9654;</button>
+    <button class="sp-btn" id="sp-next"  title="Next"     onclick="spControl('next')">&#9654;&#9654;</button>
+  </div>
+  <div id="sp-progress-wrap">
+    <span id="sp-elapsed">0:00</span>
+    <div id="sp-bar"><div id="sp-fill"></div></div>
+    <span id="sp-duration">0:00</span>
+  </div>
+  <a id="sp-connect-link" href="/auth/spotify" title="Connect Spotify">Connect Spotify</a>
+</div>
+
+<style>
+/* ── Spotify bar ─────────────────────────────────────────────────── */
+#spotify-bar {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  height: 64px;
+  background: #0a0a0a;
+  border-top: 1px solid #1DB954;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 18px;
+  z-index: 200;
+  box-shadow: 0 -4px 24px rgba(29,185,84,.12);
+}
+
+/* album art */
+#sp-art-wrap {
+  position: relative;
+  width: 44px; height: 44px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid #1DB95444;
+}
+#sp-art { width: 100%; height: 100%; object-fit: cover; display: none; }
+#sp-art-placeholder {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: #1DB954; font-size: 1.4rem; background: #111;
+}
+.sp-art-loaded #sp-art          { display: block; }
+.sp-art-loaded #sp-art-placeholder { display: none; }
+
+/* track info */
+#sp-info { flex: 1; min-width: 0; }
+#sp-track {
+  color: #e8e0c8;
+  font-family: 'Courier New', monospace;
+  font-size: .82rem;
+  font-weight: bold;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#sp-artist {
+  color: #888;
+  font-family: 'Courier New', monospace;
+  font-size: .72rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* controls */
+#sp-controls { display: flex; gap: 6px; flex-shrink: 0; }
+.sp-btn {
+  background: none;
+  border: 1px solid #1DB95466;
+  color: #1DB954;
+  font-size: .7rem;
+  width: 30px; height: 30px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+  display: flex; align-items: center; justify-content: center;
+}
+.sp-btn:hover { background: #1DB95422; border-color: #1DB954; }
+.sp-btn:active { background: #1DB95444; }
+#sp-play { width: 36px; height: 36px; font-size: .85rem; }
+
+/* progress */
+#sp-progress-wrap {
+  display: flex; align-items: center; gap: 6px;
+  flex-shrink: 0; width: 180px;
+}
+#sp-elapsed, #sp-duration {
+  color: #555;
+  font-family: 'Courier New', monospace;
+  font-size: .68rem;
+  min-width: 28px;
+}
+#sp-duration { text-align: right; }
+#sp-bar {
+  flex: 1; height: 3px;
+  background: #222;
+  border-radius: 2px;
+  overflow: hidden;
+}
+#sp-fill {
+  height: 100%;
+  background: #1DB954;
+  border-radius: 2px;
+  width: 0%;
+  transition: width .5s linear;
+}
+
+/* connect link — only visible when not authed */
+#sp-connect-link {
+  display: none;
+  color: #1DB954;
+  font-family: 'Courier New', monospace;
+  font-size: .75rem;
+  text-decoration: none;
+  border: 1px solid #1DB954;
+  padding: 4px 10px;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+#sp-connect-link:hover { background: #1DB95422; }
+.sp-needs-auth #sp-connect-link  { display: block; }
+.sp-needs-auth #sp-controls,
+.sp-needs-auth #sp-progress-wrap { display: none; }
+.sp-needs-auth #sp-track         { color: #444; }
+.sp-needs-auth #sp-artist        { display: none; }
+
+/* push page content up so it doesn't hide behind the bar */
+body { padding-bottom: 70px; }
+</style>
+
+<script>
+(function () {
+  'use strict';
+  const bar       = document.getElementById('spotify-bar');
+  const artWrap   = document.getElementById('sp-art-wrap');
+  const artImg    = document.getElementById('sp-art');
+  const trackEl   = document.getElementById('sp-track');
+  const artistEl  = document.getElementById('sp-artist');
+  const playBtn   = document.getElementById('sp-play');
+  const fillEl    = document.getElementById('sp-fill');
+  const elapsedEl = document.getElementById('sp-elapsed');
+  const durEl     = document.getElementById('sp-duration');
+
+  let _lastTrack  = null;
+  let _localMs    = 0;     // local progress interpolation
+  let _fetchedAt  = 0;
+  let _durationMs = 0;
+  let _playing    = false;
+
+  function fmtMs(ms) {
+    const s = Math.floor(ms / 1000);
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
+
+  function applyState(d) {
+    if (d.status === 'not_authed') {
+      bar.className = 'sp-needs-auth';
+      trackEl.textContent = 'Connect Spotify to enable music controls';
+      return;
+    }
+    bar.className = '';
+
+    if (d.status === 'idle') {
+      trackEl.textContent  = 'Nothing playing';
+      artistEl.textContent = '';
+      playBtn.innerHTML    = '&#9654;';
+      artWrap.classList.remove('sp-art-loaded');
+      fillEl.style.width   = '0%';
+      elapsedEl.textContent = '0:00';
+      durEl.textContent     = '0:00';
+      _playing = false;
+      return;
+    }
+
+    // playing or paused
+    _playing    = d.status === 'playing';
+    _durationMs = d.duration_ms || 0;
+    _localMs    = d.progress_ms || 0;
+    _fetchedAt  = (d.fetched_at || 0) * 1000;  // server unix → ms
+
+    playBtn.innerHTML = _playing ? '&#9646;&#9646;' : '&#9654;';
+
+    if (d.track !== _lastTrack) {
+      _lastTrack = d.track;
+      trackEl.textContent  = d.track  || '—';
+      artistEl.textContent = d.artist || '';
+      if (d.art_url) {
+        artImg.src = d.art_url;
+        artWrap.classList.add('sp-art-loaded');
+      } else {
+        artWrap.classList.remove('sp-art-loaded');
+      }
+    }
+
+    renderProgress();
+  }
+
+  function renderProgress() {
+    if (!_durationMs) return;
+    const elapsed = _playing
+      ? _localMs + (Date.now() - _fetchedAt)
+      : _localMs;
+    const clamped = Math.min(elapsed, _durationMs);
+    const pct     = (clamped / _durationMs) * 100;
+    fillEl.style.width    = pct + '%';
+    elapsedEl.textContent = fmtMs(clamped);
+    durEl.textContent     = fmtMs(_durationMs);
+  }
+
+  // Interpolate progress every second between server polls
+  setInterval(renderProgress, 1000);
+
+  // Poll server every 5 seconds
+  async function poll() {
+    try {
+      const r = await fetch('/api/spotify');
+      if (r.ok) applyState(await r.json());
+    } catch (_) {}
+  }
+  poll();
+  setInterval(poll, 5000);
+
+  // Expose control function to inline onclick handlers
+  window.spControl = async function (action) {
+    playBtn.disabled = true;
+    try {
+      const r = await fetch('/api/spotify/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      if (r.ok) applyState((await r.json()).now);
+    } catch (_) {}
+    playBtn.disabled = false;
+  };
+})();
 </script>
 </body>
 </html>
