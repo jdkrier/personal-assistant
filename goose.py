@@ -1,7 +1,12 @@
 import asyncio
+import base64
+import errno
 import json
+import logging
 import os
 import re
+import subprocess
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -14,7 +19,7 @@ import anthropic
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2.credentials import Credentials
@@ -37,7 +42,6 @@ CANVAS_ICAL_URL = os.environ["CANVAS_ICAL_URL"]
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 
 BRIEFING_FILE  = DATA_DIR / "briefing.json"
-BRIEFING_TMP   = DATA_DIR / "briefing.json.tmp"
 # Serve static files from the data dir (never iCloud-evicted).
 # The source lives in BASE_DIR/static/ and is copied to DATA_DIR/static/
 # at every startup so VS Code edits flow through automatically.
@@ -461,7 +465,6 @@ Rules:
 
 def _read_token_json() -> dict | None:
     """Read token.json using os.open with EDEADLK retry (same pattern as _read_json)."""
-    import errno as _errno
     for attempt in range(8):
         try:
             fd = os.open(str(TOKEN_PATH), os.O_RDONLY)
@@ -470,7 +473,7 @@ def _read_token_json() -> dict | None:
             finally:
                 os.close(fd)
         except OSError as e:
-            if e.errno == _errno.EDEADLK and attempt < 7:
+            if e.errno == errno.EDEADLK and attempt < 7:
                 time.sleep(min(2.0, 0.5 * (attempt + 1)))
                 continue
             _log.warning("_read_token_json failed after %d attempt(s): %s", attempt + 1, e)
@@ -662,7 +665,6 @@ def _read_json(path: Path, default):
     """
     if not path.exists():
         return default
-    import errno as _errno
     for attempt in range(8):          # initial try + up to 7 retries (~14 s total)
         try:
             fd = os.open(str(path), os.O_RDONLY)
@@ -671,7 +673,7 @@ def _read_json(path: Path, default):
             finally:
                 os.close(fd)
         except OSError as e:
-            if e.errno == _errno.EDEADLK and attempt < 7:
+            if e.errno == errno.EDEADLK and attempt < 7:
                 time.sleep(min(2.0, 0.5 * (attempt + 1)))  # 0.5, 1, 1.5, 2, 2, 2, 2 s
                 continue
             _log.warning("_read_json(%s) failed after %d attempt(s): %s",
@@ -691,7 +693,6 @@ def _write_json(path: Path, data) -> None:
     """
     tmp = path.with_suffix(".tmp")
     raw = json.dumps(data, indent=2).encode()
-    import errno as _errno
     for attempt in range(8):
         try:
             fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
@@ -702,7 +703,7 @@ def _write_json(path: Path, data) -> None:
             os.replace(tmp, path)
             return
         except OSError as e:
-            if e.errno == _errno.EDEADLK and attempt < 7:
+            if e.errno == errno.EDEADLK and attempt < 7:
                 time.sleep(min(2.0, 0.5 * (attempt + 1)))
                 continue
             _log.warning("_write_json(%s) failed after %d attempt(s): %s",
@@ -873,8 +874,7 @@ def _spotify_token() -> dict | None:
     # Refresh if expired (expires_at is unix timestamp we store)
     if time.time() >= tok.get("expires_at", 0) - 30:
         try:
-            import base64 as _b64
-            creds_b64 = _b64.b64encode(
+            creds_b64 = base64.b64encode(
                 f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}".encode()
             ).decode()
             req = urllib.request.Request(
@@ -1018,13 +1018,11 @@ def fetch_and_write_briefing() -> None:
 # com.apple.provenance xattr on editor-written files can cause Python's
 # buffered IO to raise EDEADLK.  We try multiple reading strategies and
 # log which one (if any) succeeds so we can diagnose failures.
-import logging as _logging
-_log = _logging.getLogger(__name__)
+_log = logging.getLogger(__name__)
 
 
 def _read_html_file(path: Path) -> bytes:
     """Read index.html with EDEADLK retry (same pattern as _read_json)."""
-    import errno as _errno
     p = str(path)
     for attempt in range(8):
         try:
@@ -1035,7 +1033,7 @@ def _read_html_file(path: Path) -> bytes:
             finally:
                 os.close(fd)
         except OSError as e:
-            if e.errno == _errno.EDEADLK and attempt < 7:
+            if e.errno == errno.EDEADLK and attempt < 7:
                 time.sleep(min(2.0, 0.5 * (attempt + 1)))
                 continue
             _log.warning("_read_html_file failed after %d attempt(s): %s", attempt + 1, e)
@@ -1054,7 +1052,6 @@ def _sync_static() -> None:
     Falls back gracefully if the source is unavailable — the existing
     destination copy is kept intact.
     """
-    import subprocess as _sp
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
     for fname in ("index.html",):
         src = STATIC_SRC_DIR / fname
@@ -1063,7 +1060,7 @@ def _sync_static() -> None:
             continue
         try:
             # Ask iCloud to download the file if it's been evicted (dataless)
-            _sp.run(["brctl", "download", str(src)],
+            subprocess.run(["brctl", "download", str(src)],
                     capture_output=True, timeout=30)
             raw = _read_html_file(src)
             fd = os.open(str(dst), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
@@ -1343,7 +1340,6 @@ async def get_groupme():
 @app.post("/api/groupme/refresh")
 async def groupme_refresh():
     """Trigger an immediate GroupMe poll in a background thread."""
-    import threading
     t = threading.Thread(target=poll_groupme, daemon=True)
     t.start()
     return JSONResponse({"ok": True, "message": "GroupMe poll started"})
@@ -1429,18 +1425,15 @@ async def spotify_auth():
         "scope":         SPOTIFY_SCOPES,
         "show_dialog":   "false",
     })
-    from fastapi.responses import RedirectResponse
     return RedirectResponse(f"https://accounts.spotify.com/authorize?{params}")
 
 
 @app.get("/auth/spotify/callback")
 async def spotify_callback(code: str = "", error: str = ""):
     """Exchange the auth code for access + refresh tokens."""
-    from fastapi.responses import HTMLResponse as _HTML
     if error or not code:
-        return _HTML(f"<h2>Spotify auth failed: {error}</h2>")
+        return HTMLResponse(f"<h2>Spotify auth failed: {error}</h2>")
 
-    import base64
     creds_b64 = base64.b64encode(
         f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}".encode()
     ).decode()
@@ -1466,7 +1459,7 @@ async def spotify_callback(code: str = "", error: str = ""):
             "refresh_token": data["refresh_token"],
             "expires_at":    time.time() + data["expires_in"],
         })
-        return _HTML("""
+        return HTMLResponse("""
         <html><body style="font-family:monospace;background:#111;color:#1DB954;
                            display:flex;align-items:center;justify-content:center;
                            height:100vh;margin:0;font-size:1.4rem;">
@@ -1474,7 +1467,7 @@ async def spotify_callback(code: str = "", error: str = ""):
         </body></html>
         """)
     except Exception as e:
-        return _HTML(f"<h2>Token exchange failed: {e}</h2>")
+        return HTMLResponse(f"<h2>Token exchange failed: {e}</h2>")
 
 
 @app.get("/api/spotify")
