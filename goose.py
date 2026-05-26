@@ -56,8 +56,9 @@ TOKEN_PATH     = DATA_DIR / "token.json"
 
 # ── Live Flight Radar ────────────────────────────────────────────────────────
 FLIGHTS_CACHE_FILE = DATA_DIR / "flights_cache.json"
-OPENSKY_URL        = "https://opensky-network.org/api/states/all"
-FLIGHTS_BOX_DEG    = 1.2   # ~84 miles radius around center point
+ADSB_URL           = "https://api.adsb.lol/v2/lat/{lat}/lon/{lon}/dist/{nm}"
+FLIGHTS_BOX_DEG    = 1.2   # display box: ±1.2° around centre (~84 miles)
+FLIGHTS_RADIUS_NM  = 100   # search radius sent to adsb.lol (nautical miles)
 
 # ── Behavioral Learning ──────────────────────────────────────────────────────
 DAILY_LOG_FILE = DATA_DIR / "daily_log.json"
@@ -1394,7 +1395,7 @@ async def get_patterns():
 
 @app.get("/api/flights")
 async def get_flights(lat: float = WEATHER_LAT, lon: float = WEATHER_LON):
-    """Return airborne aircraft near the given coordinates, with 30-second server-side cache."""
+    """Return airborne aircraft near the given coordinates via adsb.lol, 30-second cache."""
     cache     = await asyncio.to_thread(_read_json, FLIGHTS_CACHE_FILE, {})
     cache_age = time.time() - cache.get("fetched_at", 0)
     clat, clon = round(lat, 2), round(lon, 2)
@@ -1402,35 +1403,34 @@ async def get_flights(lat: float = WEATHER_LAT, lon: float = WEATHER_LON):
     if cache_age < 30 and cache.get("clat") == clat and cache.get("clon") == clon:
         return JSONResponse(cache)
 
-    lamin = lat - FLIGHTS_BOX_DEG
-    lamax = lat + FLIGHTS_BOX_DEG
-    lomin = lon - FLIGHTS_BOX_DEG
-    lomax = lon + FLIGHTS_BOX_DEG
-
     aircraft: list[dict] = []
     try:
-        url = f"{OPENSKY_URL}?lamin={lamin}&lomin={lomin}&lamax={lamax}&lomax={lomax}"
+        url = ADSB_URL.format(lat=lat, lon=lon, nm=FLIGHTS_RADIUS_NM)
         def _fetch_flights_sync():
             req = urllib.request.Request(url, headers={"User-Agent": "Goose/1.0"})
             with urllib.request.urlopen(req, timeout=10) as resp:
                 return json.loads(resp.read())
         data = await asyncio.to_thread(_fetch_flights_sync)
 
-        for sv in (data.get("states") or []):
-            # sv indices: 0=icao, 1=callsign, 5=lon, 6=lat,
-            #             7=baro_alt(m), 8=on_ground, 9=vel(m/s), 10=heading
-            if sv[8]:                        continue   # skip ground vehicles
-            if sv[5] is None or sv[6] is None: continue  # no position
+        for ac in (data.get("ac") or []):
+            ac_lat = ac.get("lat")
+            ac_lon = ac.get("lon")
+            if ac_lat is None or ac_lon is None:
+                continue
+            # alt_baro is feet (int) or the string "ground" for surface traffic
+            alt = ac.get("alt_baro")
+            if alt == "ground" or alt is None:
+                continue
 
-            dist = ((sv[6] - lat) ** 2 + (sv[5] - lon) ** 2) ** 0.5
+            dist = ((ac_lat - lat) ** 2 + (ac_lon - lon) ** 2) ** 0.5
             aircraft.append({
-                "icao":     sv[0],
-                "callsign": (sv[1] or "").strip() or sv[0].upper(),
-                "lat":      sv[6],
-                "lon":      sv[5],
-                "alt_ft":   round(sv[7] * 3.28084) if sv[7] else None,
-                "speed_kt": round(sv[9] * 1.94384) if sv[9] else None,
-                "heading":  sv[10] or 0,
+                "icao":     ac.get("hex", ""),
+                "callsign": (ac.get("flight") or ac.get("hex", "")).strip(),
+                "lat":      ac_lat,
+                "lon":      ac_lon,
+                "alt_ft":   int(alt),
+                "speed_kt": round(ac["gs"]) if ac.get("gs") else None,
+                "heading":  ac.get("track") or 0,
                 "dist_deg": round(dist, 4),
             })
 
