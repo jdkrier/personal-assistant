@@ -64,6 +64,8 @@ FLIGHTS_RADIUS_NM  = 100   # search radius sent to adsb.lol (nautical miles)
 DAILY_LOG_FILE        = DATA_DIR / "daily_log.json"
 PATTERNS_FILE         = DATA_DIR / "patterns.json"
 CONTEXT_FILE          = DATA_DIR / "context.json"
+WEEKLY_PLAN_FILE      = DATA_DIR / "weekly_plan.json"
+WEEKLY_STATUS_FILE    = DATA_DIR / "weekly_status.json"
 PREDICTION_THRESHOLD  = 7   # minimum log entries before predictions are generated
 
 # ── GroupMe (read-only observer — NEVER posts or sends) ─────────────────────
@@ -850,6 +852,85 @@ def detect_schedule_change() -> str | None:
     )
 
 
+def _week_start() -> str:
+    """Return the ISO date of the most recent Monday (start of current week)."""
+    today = datetime.now().date()
+    return (today - timedelta(days=today.weekday())).isoformat()
+
+
+def check_weekly_triggers() -> None:
+    """
+    Hourly job: set weekly banner state.
+    - Sunday 6pm–11:59pm → 'plan' banner (if no plan saved for this week yet)
+    - Friday 9pm–11:59pm → 'retro' banner (if plan exists but no retro yet)
+    """
+    now    = datetime.now()
+    dow    = now.weekday()   # Mon=0, Tue=1, ..., Fri=4, ..., Sun=6
+    hour   = now.hour
+
+    week_of = _week_start()
+    plan    = _read_json(WEEKLY_PLAN_FILE, {})
+    status  = _read_json(WEEKLY_STATUS_FILE, {})
+
+    new_banner_type: str | None = None
+
+    # Sunday (6) 6pm–11:59pm: show planning banner if no plan saved yet this week
+    if dow == 6 and 18 <= hour <= 23 and plan.get("week_of") != week_of:
+        new_banner_type = "plan"
+
+    # Friday (4) 9pm–11:59pm: show retro banner if plan exists but no retro yet
+    if dow == 4 and 21 <= hour <= 23 and plan.get("week_of") == week_of and not plan.get("retrospective"):
+        new_banner_type = "retro"
+
+    current_type = status.get("banner_type") if status.get("banner_active") else None
+    if new_banner_type and current_type != new_banner_type:
+        _write_json(WEEKLY_STATUS_FILE, {
+            "banner_active": True,
+            "banner_type":   new_banner_type,
+            "triggered_at":  datetime.now(timezone.utc).isoformat(),
+            "session_done":  False,
+        })
+        _log.info("check_weekly_triggers: %s banner activated", new_banner_type)
+
+
+def _extract_weekly_plan(raw_text: str) -> dict:
+    """
+    Use Claude Haiku to extract a structured weekly plan from free-form conversation text.
+    Returns a dict with keys: work_sessions_targeted, social_plans, goals,
+    blockers_anticipated, raw_summary. Returns {} on failure.
+    """
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    prompt = f"""Extract a structured weekly plan from the conversation below.
+
+Conversation:
+{raw_text}
+
+Respond with ONLY valid JSON:
+{{
+  "work_sessions_targeted": 3,
+  "social_plans": ["Friday night out", "Sunday brunch"],
+  "goals": ["finish project X", "gym 3x"],
+  "blockers_anticipated": ["busy weekend"],
+  "raw_summary": "One-sentence summary of the week plan."
+}}
+
+Rules:
+- Use the actual words and numbers Jackson said
+- Empty array [] if not mentioned
+- work_sessions_targeted must be an integer (default 0 if not mentioned)"""
+
+    try:
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=400,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return parse_llm_json(msg.content[0].text) or {}
+    except Exception as e:
+        _log.warning("_extract_weekly_plan failed: %s", e)
+        return {}
+
+
 def analyze_patterns() -> None:
     """
     Daily job: use Claude to extract behavioral patterns from the log.
@@ -860,18 +941,27 @@ def analyze_patterns() -> None:
         _log.info("analyze_patterns: only %d entries — need 7 to run", len(log))
         return
 
-    patterns = _read_json(PATTERNS_FILE, {})
+    patterns     = _read_json(PATTERNS_FILE, {})
     feedback_log = patterns.get("feedback_log", [])
+    weekly_plan  = _read_json(WEEKLY_PLAN_FILE, {})
 
     log_text      = json.dumps(log[-30:], indent=2)
     feedback_text = json.dumps(feedback_log[-20:], indent=2) if feedback_log else "None yet"
+
+    # Include this week's plan + retrospective in the prompt if they exist
+    weekly_text = ""
+    if weekly_plan:
+        weekly_text = f"""
+Weekly plan data (plan/reality gap — highest-signal learning input):
+{json.dumps(weekly_plan, indent=2)}
+"""
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     prompt = f"""You are analyzing behavioral data for a college student named Jackson.
 
 Daily activity log (one entry per day — newer entries may include richer fields):
 {log_text}
-
+{weekly_text}
 Scheduling feedback + corrections log:
 {feedback_text}
 
@@ -885,6 +975,15 @@ Fields you may see in each log entry:
 - peak_energy_time: morning / afternoon / evening / night
 - biggest_blocker: what pulled him away from focus
 - actual_focus_window: the real time window he sat down to work
+
+Weekly plan fields (if present):
+- goals: what he planned to accomplish this week
+- work_sessions_targeted: how many work sessions he planned
+- social_plans: social events he anticipated
+- blockers_anticipated: what he predicted might get in the way
+- retrospective: his Friday reflection on how the week went vs. the plan
+Use the plan/reality gap (goals vs. what actually happened in daily logs) as the
+highest-signal input for plans_vs_reality and scheduling_notes.
 
 Extract Jackson's behavioral patterns and respond with ONLY valid JSON:
 {{
@@ -1263,6 +1362,11 @@ async def lifespan(app: FastAPI):
         analyze_patterns,
         IntervalTrigger(days=1),
     )
+    scheduler.add_job(
+        check_weekly_triggers,
+        IntervalTrigger(hours=1),
+        next_run_time=datetime.now() + _startup_delay,
+    )
     scheduler.start()
 
     yield
@@ -1567,6 +1671,77 @@ async def profile_page():
         return HTMLResponse(content=b"<html><body>Profile page not found.</body></html>", status_code=404)
 
 
+@app.get("/api/weekly-status")
+async def get_weekly_status():
+    """Return current weekly banner state and this week's plan (if any)."""
+    status  = await asyncio.to_thread(_read_json, WEEKLY_STATUS_FILE, {})
+    plan    = await asyncio.to_thread(_read_json, WEEKLY_PLAN_FILE, {})
+    week_of = _week_start()
+
+    this_week_plan = plan if plan.get("week_of") == week_of else None
+    return JSONResponse({
+        "banner_active": status.get("banner_active", False),
+        "banner_type":   status.get("banner_type"),        # "plan" | "retro" | None
+        "triggered_at":  status.get("triggered_at"),
+        "session_done":  status.get("session_done", False),
+        "has_plan":      this_week_plan is not None,
+        "plan":          this_week_plan,
+        "week_of":       week_of,
+    })
+
+
+@app.post("/api/weekly-session/save")
+async def save_weekly_session(request: Request):
+    """
+    Save a weekly plan (type='plan') or retrospective (type='retro').
+    Extracts structured data from raw conversation text, writes weekly_plan.json,
+    and marks the banner as done.
+    """
+    body         = await request.json()
+    session_type = body.get("type")  # "plan" | "retro"
+    raw_text     = body.get("raw_text", "").strip()
+
+    if not session_type or not raw_text:
+        return JSONResponse({"error": "type and raw_text are required"}, status_code=400)
+
+    week_of = _week_start()
+    plan    = await asyncio.to_thread(_read_json, WEEKLY_PLAN_FILE, {})
+
+    if session_type == "plan":
+        structured = await asyncio.to_thread(_extract_weekly_plan, raw_text)
+        plan = {
+            "week_of":                week_of,
+            "work_sessions_targeted": structured.get("work_sessions_targeted", 0),
+            "social_plans":           structured.get("social_plans", []),
+            "goals":                  structured.get("goals", []),
+            "blockers_anticipated":   structured.get("blockers_anticipated", []),
+            "raw_summary":            structured.get("raw_summary", raw_text[:200]),
+            "raw_conversation":       raw_text,
+            "structured":             bool(structured),
+            "created_at":             datetime.now(timezone.utc).isoformat(),
+            "retrospective":          None,
+            "retrospective_at":       None,
+        }
+        await asyncio.to_thread(_write_json, WEEKLY_PLAN_FILE, plan)
+        _log.info("save_weekly_session: plan saved for week %s", week_of)
+
+    elif session_type == "retro":
+        plan["retrospective"]    = raw_text
+        plan["retrospective_at"] = datetime.now(timezone.utc).isoformat()
+        await asyncio.to_thread(_write_json, WEEKLY_PLAN_FILE, plan)
+        _log.info("save_weekly_session: retro saved for week %s", week_of)
+    else:
+        return JSONResponse({"error": "type must be 'plan' or 'retro'"}, status_code=400)
+
+    # Mark banner done
+    status = await asyncio.to_thread(_read_json, WEEKLY_STATUS_FILE, {})
+    status["session_done"]  = True
+    status["banner_active"] = False
+    await asyncio.to_thread(_write_json, WEEKLY_STATUS_FILE, status)
+
+    return JSONResponse({"ok": True, "week_of": week_of})
+
+
 @app.get("/api/flights")
 async def get_flights(lat: float = WEATHER_LAT, lon: float = WEATHER_LON):
     """Return airborne aircraft near the given coordinates via adsb.lol, 30-second cache."""
@@ -1646,29 +1821,81 @@ async def groupme_refresh():
 
 @app.post("/api/chat")
 async def chat(request: Request):
-    body = await request.json()
+    body     = await request.json()
     messages = body.get("messages", [])
-
-    briefing: dict = {}
-    if BRIEFING_FILE.exists():
-        try:
-            briefing = json.loads(await asyncio.to_thread(BRIEFING_FILE.read_text))
-        except Exception:
-            pass
-
-    groupme: dict = {}
-    if GROUPME_STATE_FILE.exists():
-        try:
-            groupme = json.loads(await asyncio.to_thread(GROUPME_STATE_FILE.read_text))
-        except Exception:
-            pass
+    mode     = body.get("mode", "normal")  # "normal" | "weekly_plan" | "weekly_retro"
 
     patterns: dict = await asyncio.to_thread(_read_json, PATTERNS_FILE, {})
     context:  dict = await asyncio.to_thread(_read_json, CONTEXT_FILE,  {})
-
     local_now = datetime.now().strftime("%A, %B %d, %Y %I:%M %p")
 
-    system_prompt = f"""You are Goose, a personal AI co-pilot for Jackson. Today is {local_now}.
+    if mode == "weekly_plan":
+        derived_text = json.dumps(patterns.get("derived", {}), indent=2) if patterns.get("derived") else "Not enough data yet."
+        system_prompt = f"""You are Goose, running a Sunday evening weekly planning session with Jackson. Today is {local_now}.
+
+Your job: have a natural, brief conversation to understand what's on Jackson's plate for the week. One question at a time. Keep responses to 2–3 short sentences.
+
+Ask about:
+1. What he wants to accomplish this week (goals, projects, gym, etc.)
+2. Any social plans or events coming up
+3. Anything that might get in the way
+
+When you have enough to summarize, say exactly: "Got it — I've got your plan for the week. Hit 'Save Plan' when you're ready to lock it in."
+
+Rules:
+- This will become voice-activated on a wall display — keep language natural and speakable
+- No bullet lists, no headers, no formatting — plain spoken sentences only
+- Don't ask more than one question at a time
+- Use "you" not "Jackson"
+
+Learned patterns for context: {derived_text}"""
+
+    elif mode == "weekly_retro":
+        plan    = await asyncio.to_thread(_read_json, WEEKLY_PLAN_FILE, {})
+        log     = await asyncio.to_thread(_read_json, DAILY_LOG_FILE, [])
+        week_of = _week_start()
+
+        # Pull this week's daily log entries for the retro
+        this_week_log = [e for e in log if e.get("date", "") >= week_of]
+        plan_text     = json.dumps(plan, indent=2) if plan.get("week_of") == week_of else "No plan found for this week."
+        log_text      = json.dumps(this_week_log, indent=2) if this_week_log else "No daily logs for this week yet."
+
+        system_prompt = f"""You are Goose, running a Friday evening weekly retrospective with Jackson. Today is {local_now}.
+
+Start by briefly summarizing how the week went based on the plan and daily log data below. Then let Jackson reflect.
+
+This week's plan:
+{plan_text}
+
+This week's daily log:
+{log_text}
+
+Rules:
+- Open with a 2-3 sentence summary of how the week actually went vs. what was planned
+- Reference specific goals from the plan (hit or missed?)
+- Then ask: "How do you feel about the week overall?"
+- Keep each response to 2–3 short sentences — plain spoken sentences, no lists or formatting
+- This will become voice-activated on a wall display — keep it natural and speakable
+- When Jackson is done reflecting, say exactly: "Good debrief. Hit 'Save Reflection' to lock it in."
+- Use "you" not "Jackson" """
+
+    else:
+        # Normal mode — original behavior
+        briefing: dict = {}
+        if BRIEFING_FILE.exists():
+            try:
+                briefing = json.loads(await asyncio.to_thread(BRIEFING_FILE.read_text))
+            except Exception:
+                pass
+
+        groupme: dict = {}
+        if GROUPME_STATE_FILE.exists():
+            try:
+                groupme = json.loads(await asyncio.to_thread(GROUPME_STATE_FILE.read_text))
+            except Exception:
+                pass
+
+        system_prompt = f"""You are Goose, a personal AI co-pilot for Jackson. Today is {local_now}.
 
 You have access to everything currently displayed on Jackson's dashboard:
 

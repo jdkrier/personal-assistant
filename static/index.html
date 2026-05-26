@@ -13,6 +13,8 @@
       --cyan-dim:  #006f88;
       --cyan-glow: rgba(0,212,255,0.12);
       --amber:     #ffaa00;
+      --amber-dim: rgba(255,170,0,0.35);
+      --amber-lo:  rgba(255,170,0,0.08);
       --red:       #ff3355;
       --green:     #00ff99;
       --text:      #9ab4cc;
@@ -850,6 +852,245 @@
       box-shadow: 0 0 14px rgba(200,146,34,0.25);
     }
 
+    /* ── WEEKLY PLANNING BANNER ────────────────────────────────────────────── */
+    #weekly-banner {
+      position: sticky;
+      top: 57px;      /* just below the sticky header */
+      z-index: 98;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      padding: 14px 32px;
+      background: rgba(255,170,0,0.07);
+      border-bottom: 1px solid var(--amber-dim);
+      border-top: 1px solid var(--amber-dim);
+      animation: wb-pulse 3s ease-in-out infinite;
+    }
+    @keyframes wb-pulse {
+      0%,100% { background: rgba(255,170,0,0.07); }
+      50%      { background: rgba(255,170,0,0.12); }
+    }
+    .wb-icon {
+      font-size: 22px;
+      color: var(--amber);
+      flex-shrink: 0;
+    }
+    .wb-text { flex: 1; }
+    #wb-title {
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.22em;
+      color: var(--amber);
+      text-transform: uppercase;
+    }
+    #wb-sub {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.16em;
+      color: rgba(255,170,0,0.55);
+      text-transform: uppercase;
+      margin-top: 3px;
+    }
+    #wb-cta {
+      background: var(--amber-lo);
+      border: 1px solid var(--amber);
+      color: var(--amber);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      padding: 8px 20px;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.2s, box-shadow 0.2s;
+    }
+    #wb-cta:hover {
+      background: rgba(255,170,0,0.18);
+      box-shadow: 0 0 12px rgba(255,170,0,0.25);
+    }
+
+    /* ── WEEKLY SESSION OVERLAY (voice-wall ready) ─────────────────────────── */
+    #weekly-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 500;
+      background: rgba(6,8,12,0.97);
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.35s ease;
+    }
+    #weekly-overlay.open {
+      opacity: 1;
+      pointer-events: all;
+    }
+    #weekly-overlay-inner {
+      width: 100%;
+      max-width: 900px;
+      display: flex;
+      flex-direction: column;
+      padding: 40px 48px 32px;
+    }
+    #weekly-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 32px;
+      border-bottom: 1px solid var(--amber-dim);
+      padding-bottom: 20px;
+    }
+    #weekly-eyebrow {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.3em;
+      color: var(--amber);
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #weekly-eyebrow::before {
+      content: '';
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--amber);
+      box-shadow: 0 0 8px var(--amber);
+      animation: breathe-amber 1.4s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+    @keyframes breathe-amber {
+      0%,100% { opacity:1; box-shadow: 0 0 8px rgba(255,170,0,0.8); }
+      50%      { opacity:.3; box-shadow: 0 0 3px rgba(255,170,0,0.3); }
+    }
+    #weekly-close {
+      background: none;
+      border: 1px solid rgba(255,170,0,0.35);
+      color: rgba(255,170,0,0.55);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      padding: 5px 12px;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    #weekly-close:hover { color: var(--amber); border-color: var(--amber); }
+
+    /* Conversation messages — large for wall readability */
+    #weekly-messages {
+      flex: 1;
+      overflow-y: auto;
+      margin-bottom: 24px;
+      padding-right: 8px;
+    }
+    #weekly-messages::-webkit-scrollbar { width: 3px; }
+    #weekly-messages::-webkit-scrollbar-thumb { background: var(--amber-dim); }
+
+    .wk-msg {
+      margin-bottom: 28px;
+      animation: wkFadeIn 0.4s ease;
+    }
+    @keyframes wkFadeIn { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
+
+    .wk-label {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .wk-msg.goose .wk-label { color: var(--amber); }
+    .wk-msg.user  .wk-label { color: var(--text-dim); }
+
+    .wk-bubble {
+      font-size: 20px;   /* large for voice-wall reading distance */
+      line-height: 1.65;
+      color: var(--text-hi);
+      letter-spacing: 0.01em;
+    }
+    .wk-msg.user .wk-bubble { color: var(--text); font-size: 17px; }
+
+    /* Retro plan comparison */
+    #weekly-plan-display {
+      background: rgba(255,170,0,0.04);
+      border: 1px solid var(--amber-dim);
+      padding: 20px 24px;
+      margin-bottom: 24px;
+      position: relative;
+    }
+    #weekly-plan-display::before { content:''; position:absolute; top:-1px; left:-1px; width:12px; height:12px; border-top:2px solid var(--amber); border-left:2px solid var(--amber); }
+    #weekly-plan-display::after  { content:''; position:absolute; bottom:-1px; right:-1px; width:12px; height:12px; border-bottom:2px solid var(--amber); border-right:2px solid var(--amber); }
+    .wpd-label {
+      font-family: var(--mono);
+      font-size: 9px;
+      letter-spacing: 0.28em;
+      color: var(--amber);
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+    .wpd-row { display: flex; gap: 16px; margin-bottom: 8px; align-items: flex-start; }
+    .wpd-key { font-family: var(--mono); font-size: 10px; letter-spacing: .16em; color: var(--text-dim); text-transform: uppercase; width: 140px; flex-shrink: 0; padding-top: 1px; }
+    .wpd-val { font-size: 14px; color: var(--text-hi); line-height: 1.5; }
+
+    /* Input area */
+    #weekly-input-row {
+      display: flex;
+      gap: 12px;
+      align-items: flex-end;
+    }
+    #weekly-input {
+      flex: 1;
+      background: rgba(255,170,0,0.04);
+      border: 1px solid var(--amber-dim);
+      color: var(--text-hi);
+      font-family: var(--mono);
+      font-size: 16px;
+      line-height: 1.5;
+      padding: 14px 16px;
+      resize: none;
+      min-height: 56px;
+      max-height: 160px;
+      outline: none;
+      caret-color: var(--amber);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    #weekly-input:focus {
+      border-color: var(--amber);
+      box-shadow: 0 0 12px rgba(255,170,0,0.1);
+    }
+    #weekly-input::placeholder { color: rgba(255,170,0,0.35); }
+    #weekly-actions { display: flex; flex-direction: column; gap: 8px; }
+    #weekly-send, #weekly-save {
+      background: var(--amber-lo);
+      border: 1px solid var(--amber);
+      color: var(--amber);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      padding: 9px 20px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.2s, box-shadow 0.2s;
+    }
+    #weekly-send:hover, #weekly-save:hover {
+      background: rgba(255,170,0,0.18);
+      box-shadow: 0 0 12px rgba(255,170,0,0.2);
+    }
+    #weekly-send:disabled { opacity: 0.4; cursor: default; }
+    #weekly-status-msg {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.16em;
+      color: var(--green);
+      text-transform: uppercase;
+      text-align: center;
+      margin-top: 16px;
+      display: none;
+    }
+
     #chat-panel {
       position: fixed;
       bottom: 0;
@@ -1025,6 +1266,16 @@
     <div class="clock" id="clock"></div>
   </div>
 </header>
+
+<!-- ── WEEKLY PLANNING BANNER ────────────────────────────────────────────── -->
+<div id="weekly-banner" style="display:none">
+  <div class="wb-icon">◈</div>
+  <div class="wb-text">
+    <div id="wb-title">TIME TO PLAN YOUR WEEK</div>
+    <div id="wb-sub">Sunday planning session ready — tap to start</div>
+  </div>
+  <button id="wb-cta">Open →</button>
+</div>
 
 <!-- HERO: Mission Brief -->
 <section class="section" id="hero-section">
@@ -2603,5 +2854,299 @@ body { padding-bottom: 70px; }
   };
 })();
 </script>
+<!-- ── WEEKLY SESSION OVERLAY ─────────────────────────────────────────────── -->
+<div id="weekly-overlay">
+  <div id="weekly-overlay-inner">
+
+    <div id="weekly-header">
+      <div id="weekly-eyebrow">◈ WEEKLY SESSION</div>
+      <button id="weekly-close">[ ESC ]</button>
+    </div>
+
+    <!-- Friday retro: show plan vs. actual comparison before conversation -->
+    <div id="weekly-plan-display" style="display:none"></div>
+
+    <!-- Conversation messages (voice-wall readable) -->
+    <div id="weekly-messages"></div>
+
+    <!-- Input row -->
+    <div id="weekly-input-row">
+      <textarea
+        id="weekly-input"
+        placeholder="Tell Goose what's on for the week…"
+        rows="2"
+      ></textarea>
+      <div id="weekly-actions">
+        <button id="weekly-send">Send →</button>
+        <button id="weekly-save" style="display:none">Save →</button>
+      </div>
+    </div>
+
+    <div id="weekly-status-msg">✓ Saved — session complete.</div>
+
+  </div>
+</div>
+
+<script>
+// ── WEEKLY PLANNING SESSION ─────────────────────────────────────────────────
+(function () {
+  'use strict';
+
+  const banner      = document.getElementById('weekly-banner');
+  const bannerTitle = document.getElementById('wb-title');
+  const bannerSub   = document.getElementById('wb-sub');
+  const bannerCta   = document.getElementById('wb-cta');
+  const overlay     = document.getElementById('weekly-overlay');
+  const eyebrow     = document.getElementById('weekly-eyebrow');
+  const closeBtn    = document.getElementById('weekly-close');
+  const planDisplay = document.getElementById('weekly-plan-display');
+  const messages    = document.getElementById('weekly-messages');
+  const input       = document.getElementById('weekly-input');
+  const sendBtn     = document.getElementById('weekly-send');
+  const saveBtn     = document.getElementById('weekly-save');
+  const statusMsg   = document.getElementById('weekly-status-msg');
+
+  let sessionType    = null;  // 'plan' | 'retro'
+  let history        = [];    // [{role, content}]
+  let streaming      = false;
+  let readyToSave    = false;
+  let conversationText = '';  // accumulated full conversation for save
+
+  // ── Banner check on load ──────────────────────────────────────────────────
+  async function checkWeeklyStatus() {
+    try {
+      const s = await fetch('/api/weekly-status').then(r => r.json());
+      if (!s.banner_active || s.session_done) return;
+
+      sessionType = s.banner_type;  // 'plan' | 'retro'
+
+      if (sessionType === 'plan') {
+        bannerTitle.textContent = 'TIME TO PLAN YOUR WEEK';
+        bannerSub.textContent   = 'Sunday planning session — tap to start';
+        eyebrow.textContent     = '◈ WEEKLY PLANNING SESSION';
+      } else {
+        bannerTitle.textContent = 'FRIDAY DEBRIEF';
+        bannerSub.textContent   = 'How did the week go? — tap to reflect';
+        eyebrow.textContent     = '◈ WEEKLY RETROSPECTIVE';
+        input.placeholder       = 'How did the week go?…';
+      }
+
+      banner.style.display = 'flex';
+
+      // If retro, pre-load the plan display
+      if (sessionType === 'retro' && s.plan) {
+        renderPlanDisplay(s.plan);
+      }
+    } catch {}
+  }
+
+  function renderPlanDisplay(plan) {
+    const esc = t => String(t || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const list = arr => Array.isArray(arr) && arr.length ? arr.map(i => esc(i)).join(' · ') : '—';
+    planDisplay.innerHTML = `
+      <div class="wpd-label">This Week's Plan (from Sunday)</div>
+      <div class="wpd-row"><div class="wpd-key">Goals</div><div class="wpd-val">${list(plan.goals)}</div></div>
+      <div class="wpd-row"><div class="wpd-key">Work sessions</div><div class="wpd-val">${plan.work_sessions_targeted ?? '—'} targeted</div></div>
+      <div class="wpd-row"><div class="wpd-key">Social plans</div><div class="wpd-val">${list(plan.social_plans)}</div></div>
+      <div class="wpd-row"><div class="wpd-key">Blockers expected</div><div class="wpd-val">${list(plan.blockers_anticipated)}</div></div>`;
+    planDisplay.style.display = 'block';
+  }
+
+  // ── Open / Close ──────────────────────────────────────────────────────────
+  function openOverlay() {
+    overlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    // Kick off Goose's opening line
+    if (history.length === 0) startSession();
+    setTimeout(() => input.focus(), 400);
+  }
+
+  function closeOverlay() {
+    overlay.classList.remove('open');
+    document.body.style.overflow = '';
+  }
+
+  bannerCta.addEventListener('click', openOverlay);
+  closeBtn.addEventListener('click', closeOverlay);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && overlay.classList.contains('open')) closeOverlay();
+  });
+
+  // ── Message helpers ───────────────────────────────────────────────────────
+  function appendMsg(role, text) {
+    const wrap   = document.createElement('div');
+    wrap.className = `wk-msg ${role}`;
+    const label  = document.createElement('div');
+    label.className = 'wk-label';
+    label.textContent = role === 'goose' ? 'GOOSE' : 'YOU';
+    const bubble = document.createElement('div');
+    bubble.className = 'wk-bubble';
+    bubble.textContent = text;
+    wrap.appendChild(label);
+    wrap.appendChild(bubble);
+    messages.appendChild(wrap);
+    messages.scrollTop = messages.scrollHeight;
+    return bubble;
+  }
+
+  // ── Start session: get Goose's opening message ────────────────────────────
+  async function startSession() {
+    const opener = sessionType === 'plan'
+      ? "Hey — Sunday evening. Good time to map out the week. What's on your plate?"
+      : "Let's debrief the week. How'd it go vs. what you planned?";
+
+    // For retro, use the actual Goose API to open; for plan, use a hardcoded opener
+    // to avoid a round-trip on first load
+    const bubble = appendMsg('goose', '');
+    const cursor = document.createElement('span');
+    cursor.className = 'chat-cursor';
+    bubble.appendChild(cursor);
+
+    if (sessionType === 'plan') {
+      // Short delay, then hardcoded opener
+      await new Promise(r => setTimeout(r, 500));
+      bubble.textContent = opener;
+      history.push({ role: 'assistant', content: opener });
+      conversationText += 'GOOSE: ' + opener + '\n';
+    } else {
+      // Stream the retro opener from Goose (includes plan context)
+      history.push({ role: 'user', content: 'Start the retrospective.' });
+      await streamGoose(bubble, cursor);
+    }
+    cursor.remove();
+  }
+
+  // ── Send a user message ───────────────────────────────────────────────────
+  async function send() {
+    const text = input.value.trim();
+    if (!text || streaming) return;
+    if (readyToSave) { handleSave(); return; }
+
+    input.value = '';
+    appendMsg('user', text);
+    history.push({ role: 'user', content: text });
+    conversationText += 'YOU: ' + text + '\n';
+
+    const bubble = appendMsg('goose', '');
+    const cursor = document.createElement('span');
+    cursor.className = 'chat-cursor';
+    bubble.appendChild(cursor);
+
+    sendBtn.disabled = true;
+    input.disabled   = true;
+    streaming        = true;
+
+    const reply = await streamGoose(bubble, cursor);
+    cursor.remove();
+
+    conversationText += 'GOOSE: ' + reply + '\n';
+
+    // Check for save signal phrases
+    const lower = reply.toLowerCase();
+    if (lower.includes('hit \'save plan\'') || lower.includes('hit "save plan"') ||
+        lower.includes("hit 'save plan'") ||
+        lower.includes('hit \'save reflection\'') || lower.includes('hit "save reflection"') ||
+        lower.includes("hit 'save reflection'")) {
+      readyToSave = true;
+      saveBtn.textContent = sessionType === 'plan' ? 'Save Plan →' : 'Save Reflection →';
+      saveBtn.style.display = 'block';
+    }
+
+    sendBtn.disabled = false;
+    input.disabled   = false;
+    streaming        = false;
+    input.focus();
+  }
+
+  async function streamGoose(bubble, cursor) {
+    let reply = '';
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: history,
+          mode: sessionType === 'plan' ? 'weekly_plan' : 'weekly_retro',
+        }),
+      });
+
+      const reader  = res.body.getReader();
+      const decoder = new TextDecoder();
+      let   buf     = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const raw = line.slice(6);
+          if (raw === '[DONE]') break;
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed.text) {
+              reply += parsed.text;
+              bubble.textContent = reply;
+              bubble.appendChild(cursor);
+              messages.scrollTop = messages.scrollHeight;
+            }
+          } catch {}
+        }
+      }
+    } catch (err) {
+      bubble.textContent = 'Comms error — ' + err.message;
+    }
+    history.push({ role: 'assistant', content: reply });
+    return reply;
+  }
+
+  // ── Save plan / retro ─────────────────────────────────────────────────────
+  async function handleSave() {
+    saveBtn.disabled = true;
+    sendBtn.disabled = true;
+    try {
+      const res = await fetch('/api/weekly-session/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type:     sessionType,
+          raw_text: conversationText.trim(),
+        }),
+      });
+      if (res.ok) {
+        statusMsg.style.display = 'block';
+        saveBtn.style.display   = 'none';
+        sendBtn.style.display   = 'none';
+        input.disabled          = true;
+        banner.style.display    = 'none';
+        // Close overlay after a moment
+        setTimeout(closeOverlay, 2000);
+      }
+    } catch (err) {
+      saveBtn.disabled = false;
+      sendBtn.disabled = false;
+    }
+  }
+
+  // ── Event listeners ───────────────────────────────────────────────────────
+  sendBtn.addEventListener('click', send);
+  saveBtn.addEventListener('click', handleSave);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+  // Auto-grow textarea
+  input.addEventListener('input', () => {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 160) + 'px';
+  });
+
+  // ── Init ──────────────────────────────────────────────────────────────────
+  checkWeeklyStatus();
+})();
+// ── END WEEKLY SESSION ──────────────────────────────────────────────────────
+</script>
+
 </body>
 </html>
