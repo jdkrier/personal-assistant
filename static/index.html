@@ -718,6 +718,20 @@
       50%      { opacity:.25; box-shadow: 0 0 3px var(--red); }
     }
     .priority-label::after { content:''; flex:1; height:1px; background: rgba(255,51,85,0.25); }
+    .priority-clear-btn {
+      background: none;
+      border: 1px solid rgba(255,51,85,0.45);
+      color: var(--red);
+      font-family: var(--mono);
+      font-size: 9px;
+      letter-spacing: .12em;
+      padding: 2px 8px;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: background .15s, border-color .15s;
+      flex-shrink: 0;
+    }
+    .priority-clear-btn:hover { background: rgba(255,51,85,0.12); border-color: var(--red); }
 
     .pin-row {
       display: flex;
@@ -1035,6 +1049,7 @@
     <div class="priority-label">
       <span class="blink-dot"></span>
       Priority Transmission — Pinned
+      <button class="priority-clear-btn" onclick="clearPins()" title="Dismiss pinned messages">✕ CLEAR</button>
     </div>
     <div id="priority-pins"></div>
   </div>
@@ -1914,15 +1929,19 @@
       });
     }
 
+    // Persist cleared pin IDs across page refreshes
+    const _clearedPins = new Set(JSON.parse(localStorage.getItem('clearedPinIds') || '[]'));
+
     function renderPinned(pins) {
       const panel = $('priority-panel');
       const container = $('priority-pins');
-      if (!pins || !pins.length) {
+      const visible = (pins || []).filter(p => !_clearedPins.has(String(p.id || p.text)));
+      if (!visible.length) {
         panel.classList.remove('has-pins');
         return;
       }
       panel.classList.add('has-pins');
-      container.innerHTML = pins.map(p => {
+      container.innerHTML = visible.map(p => {
         const ts = p.pinned_at
           ? new Date(p.pinned_at * 1000).toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })
           : '';
@@ -1937,10 +1956,21 @@
       }).join('');
     }
 
+    function clearPins() {
+      // Grab current pins from the DOM data and mark them all as cleared
+      const panel = $('priority-panel');
+      const rows = panel.querySelectorAll('.pin-row');
+      // Re-fetch latest pin data from last poll result stored on window
+      (window._lastPins || []).forEach(p => _clearedPins.add(String(p.id || p.text)));
+      localStorage.setItem('clearedPinIds', JSON.stringify([..._clearedPins]));
+      panel.classList.remove('has-pins');
+    }
+
     async function pollGroupMe() {
       try {
         const data = await (await fetch('/api/groupme')).json();
-        renderPinned(data.pinned || []);
+        window._lastPins = data.pinned || [];
+        renderPinned(window._lastPins);
         renderSitrep(data);
       } catch {}
     }
