@@ -1929,13 +1929,12 @@
       });
     }
 
-    // Persist cleared pin IDs across page refreshes
-    const _clearedPins = new Set(JSON.parse(localStorage.getItem('clearedPinIds') || '[]'));
-
     function renderPinned(pins) {
       const panel = $('priority-panel');
       const container = $('priority-pins');
-      const visible = (pins || []).filter(p => !_clearedPins.has(String(p.id || p.text)));
+      const clearedAt = parseInt(localStorage.getItem('pinsClearedAt') || '0');
+      // Only show pins that were pinned AFTER the last clear
+      const visible = (pins || []).filter(p => (p.pinned_at || 0) > clearedAt);
       if (!visible.length) {
         panel.classList.remove('has-pins');
         return;
@@ -1957,20 +1956,15 @@
     }
 
     function clearPins() {
-      // Grab current pins from the DOM data and mark them all as cleared
-      const panel = $('priority-panel');
-      const rows = panel.querySelectorAll('.pin-row');
-      // Re-fetch latest pin data from last poll result stored on window
-      (window._lastPins || []).forEach(p => _clearedPins.add(String(p.id || p.text)));
-      localStorage.setItem('clearedPinIds', JSON.stringify([..._clearedPins]));
-      panel.classList.remove('has-pins');
+      // Record the current time — any pin older than this stays hidden
+      localStorage.setItem('pinsClearedAt', Math.floor(Date.now() / 1000));
+      $('priority-panel').classList.remove('has-pins');
     }
 
     async function pollGroupMe() {
       try {
         const data = await (await fetch('/api/groupme')).json();
-        window._lastPins = data.pinned || [];
-        renderPinned(window._lastPins);
+        renderPinned(data.pinned || []);
         renderSitrep(data);
       } catch {}
     }
