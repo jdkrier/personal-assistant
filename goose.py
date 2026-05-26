@@ -1,10 +1,13 @@
 import asyncio
 import base64
 import errno
+import hashlib
+import hmac
 import json
 import logging
 import os
 import re
+import secrets
 import subprocess
 import threading
 import time
@@ -21,6 +24,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -76,6 +80,35 @@ SPOTIFY_SCOPES        = (
 )
 SPOTIFY_TOKEN_FILE    = DATA_DIR / "spotify_token.json"
 SPOTIFY_NOW_FILE      = DATA_DIR / "spotify_now.json"   # 5-s server-side cache
+
+# ── Auth ─────────────────────────────────────────────────────────────────────
+# APP_PASSWORD: plaintext password stored in .env — compared with constant-time
+#   hmac.compare_digest to prevent timing attacks.
+# SESSION_SECRET: random hex string used to sign session tokens.  Auto-generated
+#   at startup if not set (tokens won't survive restarts in that case).
+APP_PASSWORD   = os.environ.get("APP_PASSWORD", "")
+SESSION_SECRET = os.environ.get("SESSION_SECRET", secrets.token_hex(32))
+SESSION_COOKIE = "goose_session"
+_REMEMBER_AGE  = 30 * 24 * 3600   # 30 days in seconds
+
+
+def _make_session_token() -> str:
+    """Return a signed random session token."""
+    payload = secrets.token_hex(16)
+    sig = hmac.new(SESSION_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}.{sig}"
+
+
+def _verify_session_token(token: str) -> bool:
+    """Return True if the token's HMAC signature is valid."""
+    try:
+        payload, sig = token.rsplit(".", 1)
+        expected = hmac.new(
+            SESSION_SECRET.encode(), payload.encode(), hashlib.sha256
+        ).hexdigest()
+        return hmac.compare_digest(sig, expected)
+    except Exception:
+        return False
 
 
 def compute_urgency(days_until_due: float) -> float:
@@ -1041,7 +1074,8 @@ def _read_html_file(path: Path) -> bytes:
     raise OSError(f"All retries failed for {path}")
 
 
-_HTML_CACHE: bytes = b""
+_HTML_CACHE:  bytes       = b""
+_LOGIN_CACHE: bytes | None = None
 # Initial load deferred to lifespan (after the 5-second provenance-check sleep).
 
 def _sync_static() -> None:
@@ -1053,7 +1087,7 @@ def _sync_static() -> None:
     destination copy is kept intact.
     """
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
-    for fname in ("index.html",):
+    for fname in ("index.html", "login.html"):
         src = STATIC_SRC_DIR / fname
         dst = STATIC_DIR / fname
         if not src.exists():
@@ -1089,13 +1123,18 @@ async def lifespan(app: FastAPI):
 
     # Copy index.html from the project source dir to the local data dir.
     # This keeps VS Code edits flowing through while serving from a non-iCloud path.
-    global _HTML_CACHE
+    global _HTML_CACHE, _LOGIN_CACHE
     _sync_static()
     try:
         _HTML_CACHE = _read_html_file(STATIC_DIR / "index.html")
         _log.info("lifespan: index.html loaded (%d bytes)", len(_HTML_CACHE))
     except OSError as e:
         _log.error("lifespan: index.html load failed: %s — will retry on first request", e)
+    try:
+        _LOGIN_CACHE = _read_html_file(STATIC_DIR / "login.html")
+        _log.info("lifespan: login.html loaded (%d bytes)", len(_LOGIN_CACHE))
+    except OSError as e:
+        _log.error("lifespan: login.html load failed: %s — will serve fallback", e)
 
     seed = {"status": "loading", "generated_at": datetime.now(timezone.utc).isoformat()}
     try:
@@ -1132,6 +1171,73 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+# ── Auth middleware ───────────────────────────────────────────────────────────
+_PUBLIC_PATHS = {"/login", "/logout", "/health"}
+
+class _AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        # Always allow public paths and static assets
+        if path in _PUBLIC_PATHS or path.startswith("/static"):
+            return await call_next(request)
+        # If APP_PASSWORD is unset, skip auth entirely (local dev)
+        if not APP_PASSWORD:
+            return await call_next(request)
+        token = request.cookies.get(SESSION_COOKIE, "")
+        if token and _verify_session_token(token):
+            return await call_next(request)
+        return RedirectResponse(url="/login", status_code=302)
+
+app.add_middleware(_AuthMiddleware)
+
+
+@app.get("/health")
+async def health():
+    """Unauthenticated health check — used by Docker HEALTHCHECK."""
+    return JSONResponse({"ok": True})
+
+
+@app.get("/login")
+async def login_page(request: Request):
+    global _LOGIN_CACHE
+    # Already authenticated — send straight to the briefing
+    token = request.cookies.get(SESSION_COOKIE, "")
+    if token and _verify_session_token(token):
+        return RedirectResponse(url="/", status_code=302)
+    if not _LOGIN_CACHE:
+        try:
+            _LOGIN_CACHE = _read_html_file(STATIC_DIR / "login.html")
+        except OSError:
+            return HTMLResponse(content=b"<html><body>Login unavailable</body></html>",
+                                status_code=503)
+    return HTMLResponse(content=_LOGIN_CACHE)
+
+
+@app.post("/login")
+async def login_submit(request: Request):
+    form = await request.form()
+    password = str(form.get("password", ""))
+    remember  = str(form.get("remember", "")) == "on"
+
+    if APP_PASSWORD and not hmac.compare_digest(password, APP_PASSWORD):
+        return RedirectResponse(url="/login?error=1", status_code=302)
+
+    token    = _make_session_token()
+    max_age  = _REMEMBER_AGE if remember else None
+    response = RedirectResponse(url="/", status_code=302)
+    response.set_cookie(
+        SESSION_COOKIE, token,
+        httponly=True, samesite="lax", max_age=max_age,
+    )
+    return response
+
+
+@app.get("/logout")
+async def logout():
+    response = RedirectResponse(url="/login", status_code=302)
+    response.delete_cookie(SESSION_COOKIE)
+    return response
 
 
 @app.get("/")

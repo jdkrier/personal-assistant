@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GOOSE // AUTH REQUIRED</title>
+<style>
+  :root {
+    --bg:       #06080c;
+    --amber:    #c89222;
+    --amber-lo: rgba(200,146,34,0.12);
+    --amber-dim:rgba(200,146,34,0.35);
+    --red:      #ff3355;
+    --text-hi:  #f0e6d0;
+    --text-dim: #6b6050;
+    --mono:     'Courier New', Courier, monospace;
+    --grid:     rgba(200,146,34,0.04);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+    color: var(--text-hi);
+    overflow: hidden;
+  }
+
+  /* Grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 48px 48px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Ambient glow */
+  body::after {
+    content: '';
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 600px;
+    height: 400px;
+    background: radial-gradient(ellipse, rgba(200,146,34,0.06) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .card {
+    position: relative;
+    z-index: 1;
+    width: 420px;
+    padding: 40px 44px 44px;
+    background: rgba(6,8,12,0.92);
+    border: 1px solid var(--amber-dim);
+    animation: pulse-border 3s ease-in-out infinite;
+  }
+
+  @keyframes pulse-border {
+    0%,100% { border-color: rgba(200,146,34,0.35); box-shadow: 0 0 0 0 rgba(200,146,34,0); }
+    50%      { border-color: rgba(200,146,34,0.7);  box-shadow: 0 0 28px 2px rgba(200,146,34,0.1); }
+  }
+
+  /* Corner brackets */
+  .card::before { content:''; position:absolute; top:-1px; left:-1px; width:18px; height:18px; border-top:2px solid var(--amber); border-left:2px solid var(--amber); }
+  .card::after  { content:''; position:absolute; bottom:-1px; right:-1px; width:18px; height:18px; border-bottom:2px solid var(--amber); border-right:2px solid var(--amber); }
+  .c-tr { position:absolute; top:-1px; right:-1px; width:18px; height:18px; border-top:2px solid var(--amber); border-right:2px solid var(--amber); }
+  .c-bl { position:absolute; bottom:-1px; left:-1px; width:18px; height:18px; border-bottom:2px solid var(--amber); border-left:2px solid var(--amber); }
+
+  .callsign {
+    font-size: 11px;
+    letter-spacing: 0.28em;
+    color: var(--amber);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .callsign::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--amber-dim);
+  }
+
+  .blink {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--amber);
+    box-shadow: 0 0 6px var(--amber);
+    animation: blink 1.2s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+
+  @keyframes blink {
+    0%,100% { opacity: 1; }
+    50%      { opacity: 0.2; }
+  }
+
+  h1 {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: var(--text-hi);
+    margin-bottom: 4px;
+  }
+
+  .subtitle {
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-bottom: 36px;
+  }
+
+  label {
+    display: block;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    color: var(--amber);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  input[type="password"] {
+    width: 100%;
+    background: rgba(200,146,34,0.05);
+    border: 1px solid var(--amber-dim);
+    color: var(--text-hi);
+    font-family: var(--mono);
+    font-size: 16px;
+    letter-spacing: 0.12em;
+    padding: 12px 16px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    margin-bottom: 20px;
+    caret-color: var(--amber);
+  }
+
+  input[type="password"]:focus {
+    border-color: var(--amber);
+    box-shadow: 0 0 12px rgba(200,146,34,0.15);
+  }
+
+  input[type="password"]::placeholder {
+    color: var(--text-dim);
+    letter-spacing: 0.08em;
+  }
+
+  .remember-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 28px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .remember-row input[type="checkbox"] {
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border: 1px solid var(--amber-dim);
+    background: transparent;
+    cursor: pointer;
+    flex-shrink: 0;
+    position: relative;
+    transition: border-color 0.15s;
+  }
+
+  .remember-row input[type="checkbox"]:checked {
+    border-color: var(--amber);
+    background: var(--amber-lo);
+  }
+
+  .remember-row input[type="checkbox"]:checked::after {
+    content: '✓';
+    position: absolute;
+    top: -1px;
+    left: 1px;
+    font-size: 11px;
+    color: var(--amber);
+  }
+
+  .remember-label {
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  .submit-btn {
+    width: 100%;
+    background: var(--amber-lo);
+    border: 1px solid var(--amber);
+    color: var(--amber);
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    padding: 14px;
+    cursor: pointer;
+    transition: background 0.2s, box-shadow 0.2s;
+  }
+
+  .submit-btn:hover {
+    background: rgba(200,146,34,0.22);
+    box-shadow: 0 0 20px rgba(200,146,34,0.18);
+  }
+
+  .submit-btn:active {
+    background: rgba(200,146,34,0.3);
+  }
+
+  .error-msg {
+    display: none;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    color: var(--red);
+    text-transform: uppercase;
+    margin-bottom: 18px;
+    padding: 8px 12px;
+    border: 1px solid rgba(255,51,85,0.3);
+    background: rgba(255,51,85,0.05);
+  }
+
+  .error-msg.visible { display: block; }
+
+  .footer-line {
+    margin-top: 28px;
+    font-size: 9px;
+    letter-spacing: 0.16em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="c-tr"></div>
+  <div class="c-bl"></div>
+
+  <div class="callsign">
+    <span class="blink"></span>
+    Auth Required
+  </div>
+
+  <h1>GOOSE</h1>
+  <div class="subtitle">Personal Co-Pilot · Secure Access</div>
+
+  <div class="error-msg" id="error-msg">⚠ &nbsp; Access Denied — Invalid Passphrase</div>
+
+  <form method="POST" action="/login">
+    <label for="password">Passphrase</label>
+    <input
+      type="password"
+      id="password"
+      name="password"
+      placeholder="••••••••••••"
+      autocomplete="current-password"
+      autofocus
+      required
+    />
+
+    <label class="remember-row" for="remember">
+      <input type="checkbox" id="remember" name="remember" />
+      <span class="remember-label">Remember this device for 30 days</span>
+    </label>
+
+    <button type="submit" class="submit-btn">Authenticate →</button>
+  </form>
+
+  <div class="footer-line">Maverick — F-14 Tomcat · NAS Miramar</div>
+</div>
+
+<script>
+  // Show error message if redirected back with ?error=1
+  if (new URLSearchParams(window.location.search).get('error')) {
+    document.getElementById('error-msg').classList.add('visible');
+  }
+</script>
+
+</body>
+</html>
