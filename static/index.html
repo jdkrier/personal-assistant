@@ -1756,15 +1756,25 @@
     let userLon     = -111.9400;
     let radarSweep  = 0;         // sweep angle in radians
 
-    // Use geolocation if available (reuse same coords as weather)
+    // IP-geolocation fallback (works over HTTP when browser geolocation is blocked)
+    async function getLocationFallback() {
+      try {
+        const r = await fetch('https://ip-api.com/json/');
+        const d = await r.json();
+        if (d.status === 'success') { userLat = d.lat; userLon = d.lon; }
+      } catch {}
+      fetchFlights();
+    }
+
+    // Use geolocation if available; fall back to IP geolocation
     if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
         pos => { userLat = pos.coords.latitude; userLon = pos.coords.longitude; fetchFlights(); },
-        ()  => fetchFlights(),
+        ()  => getLocationFallback(),
         { timeout: 6000, maximumAge: 300_000 }
       );
     } else {
-      fetchFlights();
+      getLocationFallback();
     }
 
     async function fetchFlights() {

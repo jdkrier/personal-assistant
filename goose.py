@@ -57,7 +57,7 @@ TOKEN_PATH     = DATA_DIR / "token.json"
 # ── Live Flight Radar ────────────────────────────────────────────────────────
 FLIGHTS_CACHE_FILE = DATA_DIR / "flights_cache.json"
 ADSB_URL           = "https://api.adsb.lol/v2/lat/{lat}/lon/{lon}/dist/{nm}"
-FLIGHTS_BOX_DEG    = 1.2   # display box: ±1.2° around centre (~84 miles)
+FLIGHTS_BOX_DEG    = 0.6   # display box: ±0.6° around centre (~42 miles)
 FLIGHTS_RADIUS_NM  = 100   # search radius sent to adsb.lol (nautical miles)
 
 # ── Behavioral Learning ──────────────────────────────────────────────────────
