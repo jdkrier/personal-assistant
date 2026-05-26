@@ -61,9 +61,10 @@ FLIGHTS_BOX_DEG    = 0.6   # display box: ±0.6° around centre (~42 miles)
 FLIGHTS_RADIUS_NM  = 100   # search radius sent to adsb.lol (nautical miles)
 
 # ── Behavioral Learning ──────────────────────────────────────────────────────
-DAILY_LOG_FILE = DATA_DIR / "daily_log.json"
-PATTERNS_FILE  = DATA_DIR / "patterns.json"
-CONTEXT_FILE   = DATA_DIR / "context.json"
+DAILY_LOG_FILE        = DATA_DIR / "daily_log.json"
+PATTERNS_FILE         = DATA_DIR / "patterns.json"
+CONTEXT_FILE          = DATA_DIR / "context.json"
+PREDICTION_THRESHOLD  = 7   # minimum log entries before predictions are generated
 
 # ── GroupMe (read-only observer — NEVER posts or sends) ─────────────────────
 GROUPME_ACCESS_TOKEN = os.environ.get("GROUPME_ACCESS_TOKEN", "")
@@ -920,6 +921,83 @@ Use null for any field where there isn't enough data yet. Be specific and concre
         _log.info("analyze_patterns: updated from %d observations", len(log))
 
 
+def generate_prediction() -> dict:
+    """
+    Generate today's day prediction using patterns + log.
+    Cached in patterns.json — only calls Claude once per day.
+    Returns a prediction dict with keys: date, text, low_data_mode,
+    days_remaining, generated_at, accuracy.
+    """
+    today    = datetime.now().date().isoformat()
+    patterns = _read_json(PATTERNS_FILE, {})
+    preds    = patterns.get("predictions", [])
+
+    # Return cached prediction if already generated today
+    existing = next((p for p in preds if p.get("date") == today), None)
+    if existing:
+        return existing
+
+    log          = _read_json(DAILY_LOG_FILE, [])
+    entry_count  = len(log)
+    day_of_week  = datetime.now().strftime("%A")
+
+    prediction: dict = {
+        "date":         today,
+        "day_of_week":  day_of_week,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "accuracy":     None,
+    }
+
+    if entry_count < PREDICTION_THRESHOLD:
+        prediction["text"]           = None
+        prediction["low_data_mode"]  = True
+        prediction["days_remaining"] = PREDICTION_THRESHOLD - entry_count
+    else:
+        derived     = patterns.get("derived") or {}
+        today_entry = next((e for e in log if e.get("date") == today), {})
+        plans_today = today_entry.get("plans_today", "")
+
+        prompt = f"""You are Goose, a personal co-pilot. Generate a short day prediction for Jackson.
+
+Today: {day_of_week}
+{"Jackson's plan for today: " + plans_today if plans_today else "No morning plan logged yet."}
+
+Learned behavioral patterns:
+{json.dumps(derived, indent=2)}
+
+Recent log (last 14 days):
+{json.dumps(log[-14:], indent=2)}
+
+Write 2-3 short, direct sentences predicting:
+1. Whether today looks like a focus day or social day (and why, based on patterns)
+2. His likely peak energy window
+3. One concrete suggestion
+
+Rules: Use "you" not "Jackson". Be specific, not generic. No hedging phrases like "it seems" or "it appears". Short sentences. If today is a typical out night based on patterns, say so plainly."""
+
+        try:
+            client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+            msg    = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=200,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            prediction["text"]          = msg.content[0].text.strip()
+            prediction["low_data_mode"] = False
+        except Exception as e:
+            _log.warning("generate_prediction failed: %s", e)
+            prediction["text"]           = None
+            prediction["low_data_mode"]  = True
+            prediction["days_remaining"] = 0
+
+    # Store prediction, keep last 60 days
+    preds = [p for p in preds if p.get("date") != today]
+    preds.append(prediction)
+    patterns["predictions"] = preds[-60:]
+    _write_json(PATTERNS_FILE, patterns)
+    return prediction
+
+
 # ── Spotify helpers ───────────────────────────────────────────────────────────
 
 def _spotify_token() -> dict | None:
@@ -1353,15 +1431,23 @@ async def get_checkin_status():
             if len(vals) == 7 and len(set(vals)) == 1:
                 settled[field] = vals[0]
 
+    # Prediction state for the evening accuracy question
+    preds           = patterns.get("predictions", [])
+    today_pred      = next((p for p in preds if p.get("date") == today), None)
+    has_prediction  = bool(today_pred and today_pred.get("text"))
+    pred_confirmed  = bool(today_pred and today_pred.get("accuracy") is not None)
+
     return JSONResponse({
-        "done":         done,
-        "morning_done": morning_done,
-        "phase":        phase,
-        "today":        today,
-        "day_of_week":  now.strftime("%A"),
-        "entries":      len(log),
-        "settled":      settled,        # fields Goose already knows — frontend skips these
-        "has_patterns": bool(patterns.get("derived")),
+        "done":              done,
+        "morning_done":      morning_done,
+        "phase":             phase,
+        "today":             today,
+        "day_of_week":       now.strftime("%A"),
+        "entries":           len(log),
+        "settled":           settled,
+        "has_patterns":      bool(patterns.get("derived")),
+        "has_prediction":    has_prediction,
+        "pred_confirmed":    pred_confirmed,
     })
 
 
@@ -1404,6 +1490,20 @@ async def post_checkin(request: Request):
 
     log.append(entry)
     await asyncio.to_thread(_write_json, DAILY_LOG_FILE, log)
+
+    # Save prediction accuracy if provided
+    if body.get("prediction_accurate") is not None:
+        def _save_accuracy():
+            pats  = _read_json(PATTERNS_FILE, {})
+            preds = pats.get("predictions", [])
+            for p in preds:
+                if p.get("date") == today:
+                    p["accuracy"] = body["prediction_accurate"]
+                    break
+            pats["predictions"] = preds
+            _write_json(PATTERNS_FILE, pats)
+        await asyncio.to_thread(_save_accuracy)
+
     return JSONResponse({"status": "ok", "total_entries": len(log)})
 
 
@@ -1429,6 +1529,13 @@ async def post_feedback(request: Request):
 @app.get("/api/patterns")
 async def get_patterns():
     return JSONResponse(await asyncio.to_thread(_read_json, PATTERNS_FILE, {}))
+
+
+@app.get("/api/prediction")
+async def get_prediction():
+    """Return today's prediction, generating it if not yet cached."""
+    pred = await asyncio.to_thread(generate_prediction)
+    return JSONResponse(pred)
 
 
 @app.post("/api/profile-correction")
