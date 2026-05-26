@@ -89,7 +89,7 @@ SPOTIFY_NOW_FILE      = DATA_DIR / "spotify_now.json"   # 5-s server-side cache
 APP_PASSWORD   = os.environ.get("APP_PASSWORD", "")
 SESSION_SECRET = os.environ.get("SESSION_SECRET", secrets.token_hex(32))
 SESSION_COOKIE = "goose_session"
-_REMEMBER_AGE  = 30 * 24 * 3600   # 30 days in seconds
+_REMEMBER_AGE  = 24 * 3600   # 1 day in seconds
 
 
 def _make_session_token() -> str:
