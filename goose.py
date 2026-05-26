@@ -866,13 +866,24 @@ def analyze_patterns() -> None:
     feedback_text = json.dumps(feedback_log[-20:], indent=2) if feedback_log else "None yet"
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    prompt = f"""You are analyzing behavioral data for a college student named Jackson at ASU in Tempe, Arizona.
+    prompt = f"""You are analyzing behavioral data for a college student named Jackson.
 
-Daily activity log (one entry per day, Jackson filled these in himself):
+Daily activity log (one entry per day — newer entries may include richer fields):
 {log_text}
 
-Scheduling feedback log (times Jackson rejected Goose's suggestion and said why):
+Scheduling feedback + corrections log:
 {feedback_text}
+
+Fields you may see in each log entry:
+- plans_today: what Jackson intended to do that morning
+- went_out / out_time: social activity
+- work_session: when he got work done (morning/afternoon/evening/barely)
+- focus_level: locked_in / decent / scattered
+- mood_score: 1-5
+- social_vs_solo: mostly_solo / mixed / mostly_social
+- peak_energy_time: morning / afternoon / evening / night
+- biggest_blocker: what pulled him away from focus
+- actual_focus_window: the real time window he sat down to work
 
 Extract Jackson's behavioral patterns and respond with ONLY valid JSON:
 {{
@@ -880,8 +891,12 @@ Extract Jackson's behavioral patterns and respond with ONLY valid JSON:
   "avg_pregame_time": "21:00",
   "avg_out_frequency_per_week": 2.5,
   "preferred_work_times": ["14:00-17:00"],
-  "avoid_scheduling": ["Friday evenings", "nice weather under 90F"],
-  "best_scheduling": ["Monday-Wednesday afternoons", "hot days over 100F"],
+  "peak_energy_pattern": "One sentence on when he has the most energy.",
+  "mood_trend": "One sentence on mood patterns if data exists, else null.",
+  "common_blockers": ["phone", "plans came up"],
+  "plans_vs_reality": "One sentence on whether his morning plans match what he actually does, or null if not enough data.",
+  "avoid_scheduling": ["Friday evenings"],
+  "best_scheduling": ["Monday-Wednesday afternoons"],
   "weather_insight": "One sentence about how weather affects his productivity.",
   "scheduling_notes": "Specific rules Goose should follow when suggesting work times.",
   "summary": "2-3 sentences describing Jackson's patterns in plain English."
@@ -1095,7 +1110,7 @@ def _sync_static() -> None:
     destination copy is kept intact.
     """
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
-    for fname in ("index.html", "login.html"):
+    for fname in ("index.html", "login.html", "profile.html"):
         src = STATIC_SRC_DIR / fname
         dst = STATIC_DIR / fname
         if not src.exists():
@@ -1316,10 +1331,17 @@ async def get_data():
 
 @app.get("/api/checkin-status")
 async def get_checkin_status():
-    today      = datetime.now().date().isoformat()
+    now        = datetime.now()
+    today      = now.date().isoformat()
     log        = await asyncio.to_thread(_read_json, DAILY_LOG_FILE, [])
-    done       = any(e.get("date") == today for e in log)
     patterns   = await asyncio.to_thread(_read_json, PATTERNS_FILE, {})
+
+    today_entry = next((e for e in log if e.get("date") == today), None)
+    morning_done = bool(today_entry and today_entry.get("plans_today"))
+    done         = bool(today_entry and today_entry.get("work_session"))  # evening complete
+
+    # Phase: morning (before 16:00) or evening (16:00+)
+    phase = "morning" if now.hour < 16 else "evening"
 
     # Derive which questions Goose already knows the answer to with confidence.
     # A field is "settled" if the last 7 entries all gave the same answer.
@@ -1332,11 +1354,13 @@ async def get_checkin_status():
                 settled[field] = vals[0]
 
     return JSONResponse({
-        "done":        done,
-        "today":       today,
-        "day_of_week": datetime.now().strftime("%A"),
-        "entries":     len(log),
-        "settled":     settled,       # fields Goose already knows — frontend skips these
+        "done":         done,
+        "morning_done": morning_done,
+        "phase":        phase,
+        "today":        today,
+        "day_of_week":  now.strftime("%A"),
+        "entries":      len(log),
+        "settled":      settled,        # fields Goose already knows — frontend skips these
         "has_patterns": bool(patterns.get("derived")),
     })
 
@@ -1344,7 +1368,8 @@ async def get_checkin_status():
 @app.post("/api/checkin")
 async def post_checkin(request: Request):
     body  = await request.json()
-    today = datetime.now().date().isoformat()
+    now   = datetime.now()
+    today = now.date().isoformat()
 
     weather_snap = None
     try:
@@ -1354,17 +1379,30 @@ async def post_checkin(request: Request):
         pass
 
     log = await asyncio.to_thread(_read_json, DAILY_LOG_FILE, [])
-    log = [e for e in log if e.get("date") != today]   # remove duplicate if re-submitted
-    log.append({
-        "date":         today,
-        "day_of_week":  datetime.now().strftime("%A"),
-        "went_out":     body.get("went_out"),
-        "out_time":     body.get("out_time"),
-        "work_session": body.get("work_session"),
-        "focus_level":  body.get("focus_level"),
-        "weather":      weather_snap,
-        "logged_at":    datetime.now(timezone.utc).isoformat(),
-    })
+    # Merge into existing today entry so morning + evening submissions stack
+    existing = next((e for e in log if e.get("date") == today), {})
+    log = [e for e in log if e.get("date") != today]
+
+    entry = {
+        **existing,                                     # keep fields already set today
+        "date":                today,
+        "day_of_week":         now.strftime("%A"),
+        "weather":             weather_snap or existing.get("weather"),
+        "logged_at":           now.astimezone(timezone.utc).isoformat(),
+    }
+
+    # Morning fields
+    if body.get("plans_today") is not None:
+        entry["plans_today"] = body["plans_today"]
+
+    # Evening fields (all optional — only overwrite if provided)
+    for field in ("went_out", "out_time", "work_session", "focus_level",
+                  "mood_score", "social_vs_solo", "peak_energy_time",
+                  "biggest_blocker", "actual_focus_window"):
+        if body.get(field) is not None:
+            entry[field] = body[field]
+
+    log.append(entry)
     await asyncio.to_thread(_write_json, DAILY_LOG_FILE, log)
     return JSONResponse({"status": "ok", "total_entries": len(log)})
 
@@ -1391,6 +1429,35 @@ async def post_feedback(request: Request):
 @app.get("/api/patterns")
 async def get_patterns():
     return JSONResponse(await asyncio.to_thread(_read_json, PATTERNS_FILE, {}))
+
+
+@app.post("/api/profile-correction")
+async def post_profile_correction(request: Request):
+    """User corrects a learned inference from the profile page."""
+    body     = await request.json()
+    patterns = await asyncio.to_thread(_read_json, PATTERNS_FILE, {})
+    feedback = patterns.get("feedback_log", [])
+    feedback.append({
+        "date":       datetime.now().date().isoformat(),
+        "type":       "correction",
+        "field":      body.get("field"),
+        "old_value":  body.get("old_value"),
+        "correction": body.get("correction"),
+        "source":     "user",
+        "logged_at":  datetime.now(timezone.utc).isoformat(),
+    })
+    patterns["feedback_log"] = feedback
+    await asyncio.to_thread(_write_json, PATTERNS_FILE, patterns)
+    return JSONResponse({"status": "ok"})
+
+
+@app.get("/profile")
+async def profile_page():
+    try:
+        content = await asyncio.to_thread(_read_html_file, STATIC_DIR / "profile.html")
+        return HTMLResponse(content=content)
+    except OSError:
+        return HTMLResponse(content=b"<html><body>Profile page not found.</body></html>", status_code=404)
 
 
 @app.get("/api/flights")

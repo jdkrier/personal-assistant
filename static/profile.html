@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GOOSE // WHAT I KNOW</title>
+<style>
+  :root {
+    --bg:       #06080c;
+    --amber:    #c89222;
+    --amber-lo: rgba(200,146,34,0.10);
+    --amber-dim:rgba(200,146,34,0.30);
+    --green:    #00c97a;
+    --red:      #ff3355;
+    --text-hi:  #f0e6d0;
+    --text-dim: #5a5040;
+    --mono:     'Courier New', Courier, monospace;
+    --grid:     rgba(200,146,34,0.04);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    min-height: 100vh;
+    font-family: var(--mono);
+    color: var(--text-hi);
+  }
+
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 48px 48px;
+    pointer-events: none; z-index: 0;
+  }
+
+  .page {
+    position: relative; z-index: 1;
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 48px 28px 80px;
+  }
+
+  /* ── Header ── */
+  .header-row {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin-bottom: 40px;
+    border-bottom: 1px solid var(--amber-dim);
+    padding-bottom: 20px;
+  }
+
+  .callsign {
+    font-size: 10px;
+    letter-spacing: 0.28em;
+    color: var(--amber);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .blink {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--amber);
+    box-shadow: 0 0 6px var(--amber);
+    animation: blink 1.4s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.2} }
+
+  h1 { font-size: 22px; font-weight: 700; letter-spacing: 0.12em; }
+  .subtitle { font-size: 10px; letter-spacing: 0.2em; color: var(--text-dim); text-transform: uppercase; margin-top: 4px; }
+
+  .back-link {
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    color: var(--amber);
+    text-decoration: none;
+    text-transform: uppercase;
+    border: 1px solid var(--amber-dim);
+    padding: 6px 14px;
+    transition: background .15s;
+  }
+  .back-link:hover { background: var(--amber-lo); }
+
+  /* ── Stat row ── */
+  .stat-row {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 36px;
+    flex-wrap: wrap;
+  }
+  .stat {
+    background: var(--amber-lo);
+    border: 1px solid var(--amber-dim);
+    padding: 14px 20px;
+    min-width: 130px;
+  }
+  .stat-value { font-size: 28px; font-weight: 700; color: var(--amber); }
+  .stat-label { font-size: 9px; letter-spacing: 0.22em; color: var(--text-dim); text-transform: uppercase; margin-top: 4px; }
+
+  /* ── Section labels ── */
+  .section-label {
+    font-size: 10px;
+    letter-spacing: 0.3em;
+    color: var(--amber);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .section-label::after { content:''; flex:1; height:1px; background: var(--amber-dim); }
+
+  /* ── Summary block ── */
+  .summary-block {
+    border: 1px solid var(--amber-dim);
+    background: var(--amber-lo);
+    padding: 20px 22px;
+    font-size: 13px;
+    line-height: 1.7;
+    letter-spacing: 0.03em;
+    margin-bottom: 36px;
+    position: relative;
+  }
+  .summary-block::before { content:''; position:absolute; top:-1px; left:-1px; width:14px; height:14px; border-top:2px solid var(--amber); border-left:2px solid var(--amber); }
+  .summary-block::after  { content:''; position:absolute; bottom:-1px; right:-1px; width:14px; height:14px; border-bottom:2px solid var(--amber); border-right:2px solid var(--amber); }
+
+  /* ── Inference rows ── */
+  .inferences { margin-bottom: 36px; }
+
+  .inference-row {
+    border: 1px solid rgba(200,146,34,0.15);
+    padding: 14px 16px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    transition: background .15s;
+  }
+  .inference-row:hover { background: rgba(200,146,34,0.04); }
+
+  .inference-key {
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-bottom: 5px;
+  }
+  .inference-value {
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    line-height: 1.5;
+    color: var(--text-hi);
+    flex: 1;
+  }
+  .inference-value.null-val { color: var(--text-dim); font-style: italic; }
+
+  .correct-btn {
+    background: none;
+    border: 1px solid rgba(200,146,34,0.3);
+    color: var(--amber);
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    padding: 5px 10px;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: background .15s, border-color .15s;
+  }
+  .correct-btn:hover { background: var(--amber-lo); border-color: var(--amber); }
+
+  /* correction inline form */
+  .correction-form {
+    display: none;
+    margin-top: 10px;
+    gap: 8px;
+  }
+  .correction-form.open { display: flex; flex-wrap: wrap; }
+  .correction-form input {
+    flex: 1;
+    min-width: 180px;
+    background: rgba(200,146,34,0.05);
+    border: 1px solid var(--amber-dim);
+    color: var(--text-hi);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 7px 10px;
+    outline: none;
+    caret-color: var(--amber);
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .correction-form input:focus { border-color: var(--amber); box-shadow: 0 0 8px rgba(200,146,34,.12); }
+  .correction-submit {
+    background: var(--amber-lo);
+    border: 1px solid var(--amber);
+    color: var(--amber);
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    padding: 7px 14px;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  .correction-submit:hover { background: rgba(200,146,34,.2); }
+
+  .correction-saved {
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    color: var(--green);
+    text-transform: uppercase;
+    display: none;
+    align-self: center;
+  }
+
+  /* ── No-data state ── */
+  .no-data {
+    border: 1px solid rgba(200,146,34,0.15);
+    padding: 32px 24px;
+    text-align: center;
+    margin-bottom: 36px;
+  }
+  .no-data .no-data-title { font-size: 14px; letter-spacing: 0.12em; margin-bottom: 10px; }
+  .no-data .no-data-sub { font-size: 11px; letter-spacing: 0.14em; color: var(--text-dim); text-transform: uppercase; }
+  .no-data .no-data-bar {
+    height: 4px;
+    background: rgba(200,146,34,0.1);
+    margin: 20px auto 8px;
+    max-width: 300px;
+    position: relative;
+  }
+  .no-data .no-data-fill {
+    height: 100%;
+    background: var(--amber);
+    transition: width 1s ease;
+  }
+  .no-data .no-data-count { font-size: 10px; letter-spacing: 0.18em; color: var(--amber); text-transform: uppercase; }
+
+  /* ── Footer ── */
+  .page-footer {
+    margin-top: 48px;
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    text-align: center;
+    border-top: 1px solid rgba(200,146,34,0.1);
+    padding-top: 20px;
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- Header -->
+  <div class="header-row">
+    <div>
+      <div class="callsign"><span class="blink"></span> Pilot Profile</div>
+      <h1>WHAT GOOSE KNOWS</h1>
+      <div class="subtitle">Behavioral Intelligence · Updated Daily</div>
+    </div>
+    <a href="/" class="back-link">← Back to Cockpit</a>
+  </div>
+
+  <!-- Stats row -->
+  <div class="stat-row" id="stat-row">
+    <div class="stat">
+      <div class="stat-value" id="stat-entries">—</div>
+      <div class="stat-label">Days logged</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value" id="stat-needed">7</div>
+      <div class="stat-label">Needed to analyze</div>
+    </div>
+    <div class="stat" id="stat-last-analyzed-wrap" style="display:none">
+      <div class="stat-value" id="stat-last-analyzed">—</div>
+      <div class="stat-label">Last analyzed</div>
+    </div>
+  </div>
+
+  <!-- Summary -->
+  <div class="section-label">Pattern Summary</div>
+
+  <div id="summary-section">
+    <!-- Populated by JS -->
+  </div>
+
+  <!-- Inferences -->
+  <div class="section-label" id="inferences-label" style="display:none">What I've Learned</div>
+  <div class="inferences" id="inferences-list"></div>
+
+  <div class="page-footer">Goose · Personal Co-Pilot · NAS Miramar</div>
+</div>
+
+<script>
+const INFERENCE_META = {
+  typical_out_days:            { label: 'Typical nights out',        editable: true },
+  avg_pregame_time:            { label: 'Typical pregame time',      editable: true },
+  avg_out_frequency_per_week:  { label: 'Nights out / week',         editable: false },
+  preferred_work_times:        { label: 'Preferred work windows',    editable: true },
+  peak_energy_pattern:         { label: 'Peak energy pattern',       editable: true },
+  mood_trend:                  { label: 'Mood trend',                editable: true },
+  common_blockers:             { label: 'Common focus killers',      editable: true },
+  plans_vs_reality:            { label: 'Plans vs reality',          editable: true },
+  avoid_scheduling:            { label: 'Avoid scheduling these',    editable: true },
+  best_scheduling:             { label: 'Best times to work',        editable: true },
+  weather_insight:             { label: 'Weather & productivity',    editable: true },
+  scheduling_notes:            { label: 'Scheduling rules',          editable: true },
+};
+
+function formatVal(v) {
+  if (v === null || v === undefined) return null;
+  if (Array.isArray(v)) return v.join(', ');
+  return String(v);
+}
+
+function buildCorrectionForm(field, currentVal, row) {
+  const form = document.createElement('div');
+  form.className = 'correction-form';
+  form.innerHTML = `
+    <input type="text" placeholder="Correction — e.g. actually late night after 10pm" />
+    <button class="correction-submit">Submit →</button>
+    <span class="correction-saved">✓ Saved</span>
+  `;
+  row.appendChild(form);
+
+  form.querySelector('.correction-submit').addEventListener('click', async () => {
+    const correction = form.querySelector('input').value.trim();
+    if (!correction) return;
+    await fetch('/api/profile-correction', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ field, old_value: currentVal, correction }),
+    });
+    form.querySelector('.correction-saved').style.display = 'inline';
+    form.querySelector('.correction-submit').style.display = 'none';
+    form.querySelector('input').disabled = true;
+  });
+
+  return form;
+}
+
+async function load() {
+  const [statusData, patternsData] = await Promise.all([
+    fetch('/api/checkin-status').then(r => r.json()).catch(() => ({})),
+    fetch('/api/patterns').then(r => r.json()).catch(() => ({})),
+  ]);
+
+  const entries = statusData.entries ?? 0;
+  document.getElementById('stat-entries').textContent = entries;
+  const needed = Math.max(0, 7 - entries);
+  document.getElementById('stat-needed').textContent = needed === 0 ? '✓' : needed;
+
+  if (patternsData.last_analyzed) {
+    const d = new Date(patternsData.last_analyzed);
+    document.getElementById('stat-last-analyzed').textContent =
+      d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    document.getElementById('stat-last-analyzed-wrap').style.display = 'block';
+  }
+
+  const summarySection = document.getElementById('summary-section');
+  const derived = patternsData.derived;
+
+  if (!derived) {
+    // No data yet
+    const pct = Math.min(100, Math.round((entries / 7) * 100));
+    summarySection.innerHTML = `
+      <div class="no-data">
+        <div class="no-data-title">Not enough data yet</div>
+        <div class="no-data-sub">Goose needs ${7 - entries} more day${7 - entries === 1 ? '' : 's'} of check-ins to start learning</div>
+        <div class="no-data-bar"><div class="no-data-fill" id="prog-fill" style="width:0%"></div></div>
+        <div class="no-data-count">${entries} / 7 days logged</div>
+      </div>
+    `;
+    setTimeout(() => {
+      const fill = document.getElementById('prog-fill');
+      if (fill) fill.style.width = pct + '%';
+    }, 100);
+    return;
+  }
+
+  // Summary
+  const summary = derived.summary || 'Analysis complete — check back tomorrow.';
+  summarySection.innerHTML = `<div class="summary-block">${summary}</div>`;
+
+  // Inferences
+  document.getElementById('inferences-label').style.display = 'flex';
+  const list = document.getElementById('inferences-list');
+
+  Object.entries(INFERENCE_META).forEach(([field, meta]) => {
+    const rawVal = derived[field];
+    const val    = formatVal(rawVal);
+    if (val === null) return; // omit null fields
+
+    const row = document.createElement('div');
+    row.className = 'inference-row';
+
+    const info = document.createElement('div');
+    info.style.flex = '1';
+    info.innerHTML = `
+      <div class="inference-key">${meta.label}</div>
+      <div class="inference-value">${val}</div>
+    `;
+    row.appendChild(info);
+
+    if (meta.editable) {
+      const btn = document.createElement('button');
+      btn.className = 'correct-btn';
+      btn.textContent = 'Correct this';
+      btn.addEventListener('click', () => {
+        const existing = row.querySelector('.correction-form');
+        if (existing) {
+          existing.classList.toggle('open');
+        } else {
+          const form = buildCorrectionForm(field, val, row);
+          form.classList.add('open');
+        }
+      });
+      row.appendChild(btn);
+    }
+
+    list.appendChild(row);
+  });
+
+  if (list.children.length === 0) {
+    list.innerHTML = '<div style="color:var(--text-dim);font-size:12px;letter-spacing:.12em">No inferences yet — check back after the next analysis.</div>';
+  }
+}
+
+load().catch(console.error);
+</script>
+</body>
+</html>

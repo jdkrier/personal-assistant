@@ -966,44 +966,105 @@
   <!-- Daily check-in card -->
   <div id="checkin-card" class="reveal">
     <div class="checkin-header">
-      <div class="checkin-title">◆ Daily Log — Last Night</div>
+      <div class="checkin-title" id="checkin-title">◆ Daily Log</div>
       <button id="checkin-skip">Skip →</button>
     </div>
 
-    <div class="checkin-q">
-      <div class="checkin-q-label">Did you go out last night?</div>
-      <div class="chip-row" id="chips-out">
-        <button class="chip" data-q="went_out" data-v="yes">Yes</button>
-        <button class="chip" data-q="went_out" data-v="no">No</button>
+    <!-- MORNING PHASE: plan your day -->
+    <div id="checkin-morning" style="display:none">
+      <div class="checkin-q">
+        <div class="checkin-q-label">What's your plan for today?</div>
+        <textarea id="plans-today-input"
+          placeholder="gym this morning, work on Goose in the afternoon, maybe go out tonight..."
+          style="width:100%;background:rgba(200,146,34,0.05);border:1px solid rgba(200,146,34,0.35);
+                 color:#f0e6d0;font-family:'Courier New',monospace;font-size:13px;line-height:1.5;
+                 padding:10px 12px;outline:none;resize:vertical;min-height:70px;
+                 caret-color:#c89222;letter-spacing:0.04em;transition:border-color .2s,box-shadow .2s;"
+          onfocus="this.style.borderColor='#c89222';this.style.boxShadow='0 0 10px rgba(200,146,34,.15)'"
+          onblur="this.style.borderColor='rgba(200,146,34,0.35)';this.style.boxShadow='none'"
+        ></textarea>
       </div>
     </div>
 
-    <div class="checkin-q" id="q-out-time" style="display:none">
-      <div class="checkin-q-label">What time did you head out?</div>
-      <div class="chip-row">
-        <button class="chip" data-q="out_time" data-v="9_10pm">9–10pm</button>
-        <button class="chip" data-q="out_time" data-v="10_11pm">10–11pm</button>
-        <button class="chip" data-q="out_time" data-v="11pm_12am">11pm–12am</button>
-        <button class="chip" data-q="out_time" data-v="after_midnight">After midnight</button>
+    <!-- EVENING PHASE: log the day -->
+    <div id="checkin-evening" style="display:none">
+      <div class="checkin-q">
+        <div class="checkin-q-label">Did you go out last night?</div>
+        <div class="chip-row" id="chips-out">
+          <button class="chip" data-q="went_out" data-v="yes">Yes</button>
+          <button class="chip" data-q="went_out" data-v="no">No</button>
+        </div>
       </div>
-    </div>
 
-    <div class="checkin-q">
-      <div class="checkin-q-label">When did you get work done?</div>
-      <div class="chip-row">
-        <button class="chip" data-q="work_session" data-v="morning">Morning</button>
-        <button class="chip" data-q="work_session" data-v="afternoon">Afternoon</button>
-        <button class="chip" data-q="work_session" data-v="evening">Evening</button>
-        <button class="chip" data-q="work_session" data-v="barely">Barely</button>
+      <div class="checkin-q" id="q-out-time" style="display:none">
+        <div class="checkin-q-label">What time did you head out?</div>
+        <div class="chip-row">
+          <button class="chip" data-q="out_time" data-v="9_10pm">9–10pm</button>
+          <button class="chip" data-q="out_time" data-v="10_11pm">10–11pm</button>
+          <button class="chip" data-q="out_time" data-v="11pm_12am">11pm–12am</button>
+          <button class="chip" data-q="out_time" data-v="after_midnight">After midnight</button>
+        </div>
       </div>
-    </div>
 
-    <div class="checkin-q">
-      <div class="checkin-q-label">How focused were you?</div>
-      <div class="chip-row">
-        <button class="chip" data-q="focus_level" data-v="locked_in">Locked in</button>
-        <button class="chip" data-q="focus_level" data-v="decent">Decent</button>
-        <button class="chip" data-q="focus_level" data-v="scattered">Scattered</button>
+      <div class="checkin-q">
+        <div class="checkin-q-label">When did you get work done?</div>
+        <div class="chip-row">
+          <button class="chip" data-q="work_session" data-v="morning">Morning</button>
+          <button class="chip" data-q="work_session" data-v="afternoon">Afternoon</button>
+          <button class="chip" data-q="work_session" data-v="evening">Evening</button>
+          <button class="chip" data-q="work_session" data-v="barely">Barely</button>
+        </div>
+      </div>
+
+      <div class="checkin-q">
+        <div class="checkin-q-label">How focused were you?</div>
+        <div class="chip-row">
+          <button class="chip" data-q="focus_level" data-v="locked_in">Locked in</button>
+          <button class="chip" data-q="focus_level" data-v="decent">Decent</button>
+          <button class="chip" data-q="focus_level" data-v="scattered">Scattered</button>
+        </div>
+      </div>
+
+      <div class="checkin-q">
+        <div class="checkin-q-label">Energy peak today?</div>
+        <div class="chip-row">
+          <button class="chip" data-q="peak_energy_time" data-v="morning">Morning</button>
+          <button class="chip" data-q="peak_energy_time" data-v="afternoon">Afternoon</button>
+          <button class="chip" data-q="peak_energy_time" data-v="evening">Evening</button>
+          <button class="chip" data-q="peak_energy_time" data-v="night">Night</button>
+          <button class="chip" data-q="peak_energy_time" data-v="never">Never hit it</button>
+        </div>
+      </div>
+
+      <div class="checkin-q">
+        <div class="checkin-q-label">Vibe of the day?</div>
+        <div class="chip-row">
+          <button class="chip" data-q="social_vs_solo" data-v="solo">Solo</button>
+          <button class="chip" data-q="social_vs_solo" data-v="mixed">Mixed</button>
+          <button class="chip" data-q="social_vs_solo" data-v="social">Social</button>
+        </div>
+      </div>
+
+      <div class="checkin-q">
+        <div class="checkin-q-label">Mood today?</div>
+        <div class="chip-row">
+          <button class="chip" data-q="mood_score" data-v="1">1 — rough</button>
+          <button class="chip" data-q="mood_score" data-v="2">2</button>
+          <button class="chip" data-q="mood_score" data-v="3">3 — fine</button>
+          <button class="chip" data-q="mood_score" data-v="4">4</button>
+          <button class="chip" data-q="mood_score" data-v="5">5 — great</button>
+        </div>
+      </div>
+
+      <div class="checkin-q">
+        <div class="checkin-q-label">Biggest focus killer? <span style="color:var(--text-dim);font-size:10px">(optional)</span></div>
+        <div class="chip-row">
+          <button class="chip" data-q="biggest_blocker" data-v="phone">Phone</button>
+          <button class="chip" data-q="biggest_blocker" data-v="tired">Tired</button>
+          <button class="chip" data-q="biggest_blocker" data-v="plans_came_up">Plans came up</button>
+          <button class="chip" data-q="biggest_blocker" data-v="felt_off">Felt off</button>
+          <button class="chip" data-q="biggest_blocker" data-v="nothing">Nothing</button>
+        </div>
       </div>
     </div>
 
@@ -1075,7 +1136,7 @@
 </section>
 
 <footer class="site-footer">
-  <span>Local · ASU Canvas + Google Calendar</span>
+  <span>Local · ASU Canvas + Google Calendar · <a href="/profile" style="color:var(--amber);text-decoration:none;letter-spacing:.12em" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">What Goose Knows ↗</a></span>
   <span id="last-update"></span>
 </footer>
 
@@ -1298,105 +1359,116 @@
     const submit  = $('checkin-submit');
     const doneMsg = $('checkin-done');
     const answers = {};
+    const today   = new Date().toISOString().slice(0, 10);
 
-    // Check if already done today (localStorage fast-path, then server confirm)
-    const todayKey = 'checkin_' + new Date().toISOString().slice(0, 10);
-    if (localStorage.getItem(todayKey)) return;
+    const morningKey = 'checkin_morning_' + today;
+    const eveningKey = 'checkin_' + today;
 
-    const FIELD_LABELS = {
-      out_time:     { before: 'What time did you head out?', after: null },
-      work_session: { before: 'When did you get work done?', after: null },
-      focus_level:  { before: 'How focused were you?',       after: null },
-    };
     const SETTLED_LABELS = {
-      '9_10pm':      '9–10pm',   '10_11pm':     '10–11pm',
-      '11pm_12am':   '11pm–12am','after_midnight':'After midnight',
-      morning:       'Morning',  afternoon:     'Afternoon',
-      evening:       'Evening',  barely:        'Barely',
-      locked_in:     'Locked in',decent:        'Decent',
-      scattered:     'Scattered',
+      '9_10pm': '9–10pm', '10_11pm': '10–11pm',
+      '11pm_12am': '11pm–12am', after_midnight: 'After midnight',
+      morning: 'Morning', afternoon: 'Afternoon', evening: 'Evening', barely: 'Barely',
+      locked_in: 'Locked in', decent: 'Decent', scattered: 'Scattered',
     };
+
+    function collapseCard() {
+      card.style.transition = 'opacity 0.6s, max-height 0.6s';
+      card.style.opacity    = '0';
+      card.style.maxHeight  = '0';
+      card.style.overflow   = 'hidden';
+      card.style.marginBottom = '0';
+      card.style.padding    = '0';
+    }
+
+    function checkSubmitEnabled(phase) {
+      if (phase === 'morning') {
+        submit.disabled = !($('plans-today-input').value.trim());
+      } else {
+        submit.disabled = !(answers.went_out && answers.work_session && answers.focus_level);
+      }
+    }
 
     fetch('/api/checkin-status').then(r => r.json()).then(s => {
-      if (s.done) { localStorage.setItem(todayKey, '1'); return; }
+      const phase = s.phase || 'evening';
 
-      // Pre-fill and hide questions Goose already knows with confidence
-      const settled = s.settled || {};
-      Object.entries(settled).forEach(([field, val]) => {
-        answers[field] = val;   // pre-fill answer
-        // Find the question block containing a chip with this data-q and hide it
-        const chip = card.querySelector(`.chip[data-q="${field}"][data-v="${val}"]`);
-        if (chip) {
-          const qBlock = chip.closest('.checkin-q');
-          if (qBlock) {
-            const lbl = qBlock.querySelector('.checkin-q-label');
-            const label = SETTLED_LABELS[val] || val;
-            // Replace with a compact "already know" line
-            qBlock.innerHTML = `<div class="checkin-q-label" style="color:var(--text-dim)">
-              ${lbl ? lbl.textContent : field} — <span style="color:var(--green)">${label} (learned)</span>
-            </div>`;
+      // Morning: show if plans_today not yet logged
+      if (phase === 'morning') {
+        if (s.morning_done || localStorage.getItem(morningKey)) return;
+        $('checkin-title').textContent = '◆ Plan Your Day';
+        submit.textContent = 'Set intentions →';
+        $('checkin-morning').style.display = 'block';
+        card.classList.add('visible');
+
+        $('plans-today-input').addEventListener('input', () => checkSubmitEnabled('morning'));
+
+      } else {
+        // Evening: show if full log not yet done
+        if (s.done || localStorage.getItem(eveningKey)) return;
+
+        $('checkin-title').textContent = '◆ Daily Log — Last Night';
+        $('checkin-evening').style.display = 'block';
+        card.classList.add('visible');
+
+        // Pre-fill settled fields
+        const settled = s.settled || {};
+        Object.entries(settled).forEach(([field, val]) => {
+          answers[field] = val;
+          const chip = card.querySelector(`.chip[data-q="${field}"][data-v="${val}"]`);
+          if (chip) {
+            const qBlock = chip.closest('.checkin-q');
+            if (qBlock) {
+              const lbl = qBlock.querySelector('.checkin-q-label');
+              qBlock.innerHTML = `<div class="checkin-q-label" style="color:var(--text-dim)">
+                ${lbl ? lbl.textContent : field} — <span style="color:var(--green)">${SETTLED_LABELS[val] || val} (learned)</span>
+              </div>`;
+            }
           }
+        });
+        checkSubmitEnabled('evening');
+      }
+
+      // Chip selection (evening only — morning uses textarea)
+      document.addEventListener('click', e => {
+        const chip = e.target.closest('.chip');
+        if (!chip || !card.contains(chip)) return;
+        const q = chip.dataset.q, v = chip.dataset.v;
+        chip.closest('.chip-row').querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
+        chip.classList.add('selected');
+        answers[q] = v;
+        if (q === 'went_out') {
+          $('q-out-time').style.display = v === 'yes' ? 'block' : 'none';
+          if (v === 'no') delete answers['out_time'];
+        }
+        checkSubmitEnabled(phase);
+      });
+
+      // Submit
+      submit.addEventListener('click', async () => {
+        submit.disabled = true;
+        const payload = phase === 'morning'
+          ? { plans_today: $('plans-today-input').value.trim() }
+          : { ...answers };
+        try {
+          await fetch('/api/checkin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          doneMsg.style.display = 'block';
+          submit.style.display  = 'none';
+          localStorage.setItem(phase === 'morning' ? morningKey : eveningKey, '1');
+          setTimeout(collapseCard, 800);
+        } catch {
+          submit.disabled = false;
         }
       });
 
-      card.classList.add('visible');
-      // Re-evaluate submit button since some answers may be pre-filled
-      const required = answers.went_out && answers.work_session && answers.focus_level;
-      submit.disabled = !required;
     }).catch(() => {});
-
-    // Chip selection
-    document.addEventListener('click', e => {
-      const chip = e.target.closest('.chip');
-      if (!chip || !card.contains(chip)) return;
-
-      const q = chip.dataset.q;
-      const v = chip.dataset.v;
-
-      // Deselect siblings
-      chip.closest('.chip-row').querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
-      chip.classList.add('selected');
-      answers[q] = v;
-
-      // Show out-time question when "yes" to going out
-      if (q === 'went_out') {
-        $('q-out-time').style.display = v === 'yes' ? 'block' : 'none';
-        if (v === 'no') delete answers['out_time'];
-      }
-
-      // Enable submit if required fields answered
-      const required = answers.went_out && answers.work_session && answers.focus_level;
-      submit.disabled = !required;
-    });
-
-    // Submit
-    submit.addEventListener('click', async () => {
-      submit.disabled = true;
-      try {
-        await fetch('/api/checkin', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(answers),
-        });
-        doneMsg.style.display = 'block';
-        submit.style.display  = 'none';
-        localStorage.setItem(todayKey, '1');
-        setTimeout(() => {
-          card.style.transition = 'opacity 0.6s, max-height 0.6s';
-          card.style.opacity = '0';
-          card.style.maxHeight = '0';
-          card.style.overflow = 'hidden';
-          card.style.marginBottom = '0';
-          card.style.padding = '0';
-        }, 800);
-      } catch {
-        submit.disabled = false;
-      }
-    });
 
     // Skip
     $('checkin-skip').addEventListener('click', () => {
-      localStorage.setItem(todayKey, '1');
+      const phase = $('checkin-morning').style.display !== 'none' ? 'morning' : 'evening';
+      localStorage.setItem(phase === 'morning' ? morningKey : eveningKey, '1');
       card.style.display = 'none';
     });
   })();
