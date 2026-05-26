@@ -46,6 +46,7 @@ BRIEFING_FILE  = DATA_DIR / "briefing.json"
 # at every startup so VS Code edits flow through automatically.
 STATIC_SRC_DIR = BASE_DIR / "static"
 STATIC_DIR     = DATA_DIR / "static"
+STATIC_DIR.mkdir(parents=True, exist_ok=True)   # must exist before StaticFiles mounts
 TOKEN_PATH     = DATA_DIR / "token.json"
 
 # ── Live Flight Radar ────────────────────────────────────────────────────────
