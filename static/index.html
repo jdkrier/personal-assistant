@@ -783,6 +783,29 @@
       box-shadow: 0 0 14px rgba(0,212,255,0.35);
     }
 
+    #profile-btn {
+      position: fixed;
+      bottom: 72px;
+      right: 32px;
+      z-index: 200;
+      background: var(--amber-lo);
+      border: 1px solid var(--amber-dim);
+      color: var(--amber);
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      padding: 9px 18px;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+      transition: background 0.2s, box-shadow 0.2s;
+      clip-path: polygon(8px 0%, 100% 0%, calc(100% - 8px) 100%, 0% 100%);
+    }
+    #profile-btn:hover {
+      background: rgba(200,146,34,0.2);
+      box-shadow: 0 0 14px rgba(200,146,34,0.25);
+    }
+
     #chat-panel {
       position: fixed;
       bottom: 0;
@@ -1136,7 +1159,7 @@
 </section>
 
 <footer class="site-footer">
-  <span>Local · ASU Canvas + Google Calendar · <a href="/profile" style="color:var(--amber);text-decoration:none;letter-spacing:.12em" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">What Goose Knows ↗</a></span>
+  <span>Local · ASU Canvas + Google Calendar</span>
   <span id="last-update"></span>
 </footer>
 
@@ -2075,6 +2098,7 @@
 </script>
 
 <!-- ── CHAT PANEL ─────────────────────────────────────────────────────── -->
+<a id="profile-btn" href="/profile">◈ INTEL</a>
 <button id="chat-toggle">⌘ COMMS</button>
 
 <div id="chat-panel">
