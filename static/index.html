@@ -1955,11 +1955,11 @@
       }).join('');
     }
 
-    function clearPins() {
+    window.clearPins = function () {
       // Record the current time — any pin older than this stays hidden
       localStorage.setItem('pinsClearedAt', Math.floor(Date.now() / 1000));
       $('priority-panel').classList.remove('has-pins');
-    }
+    };
 
     async function pollGroupMe() {
       try {
