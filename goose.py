@@ -3,6 +3,7 @@ import base64
 import errno
 import hashlib
 import hmac
+import html
 import json
 import logging
 import os
@@ -87,7 +88,13 @@ SPOTIFY_NOW_FILE      = DATA_DIR / "spotify_now.json"   # 5-s server-side cache
 # SESSION_SECRET: random hex string used to sign session tokens.  Auto-generated
 #   at startup if not set (tokens won't survive restarts in that case).
 APP_PASSWORD   = os.environ.get("APP_PASSWORD", "")
-SESSION_SECRET = os.environ.get("SESSION_SECRET", secrets.token_hex(32))
+SESSION_SECRET = os.environ.get("SESSION_SECRET", "")
+if not SESSION_SECRET:
+    SESSION_SECRET = secrets.token_hex(32)
+    logging.getLogger(__name__).warning(
+        "SESSION_SECRET not set in environment — generated a throwaway secret. "
+        "All sessions will be invalidated on restart. Set SESSION_SECRET in .env to persist sessions."
+    )
 SESSION_COOKIE = "goose_session"
 _REMEMBER_AGE  = 24 * 3600   # 1 day in seconds
 
@@ -1220,7 +1227,11 @@ async def login_submit(request: Request):
     password = str(form.get("password", ""))
     remember  = str(form.get("remember", "")) == "on"
 
-    if APP_PASSWORD and not hmac.compare_digest(password, APP_PASSWORD):
+    # Auth disabled (no APP_PASSWORD) — redirect straight through, no cookie needed
+    if not APP_PASSWORD:
+        return RedirectResponse(url="/", status_code=302)
+
+    if not hmac.compare_digest(password, APP_PASSWORD):
         return RedirectResponse(url="/login?error=1", status_code=302)
 
     token    = _make_session_token()
@@ -1270,8 +1281,10 @@ async def get_weather(lat: float, lon: float):
             "&temperature_unit=fahrenheit&wind_speed_unit=mph"
             "&precipitation_unit=inch&timezone=auto&forecast_days=1"
         )
-        with urllib.request.urlopen(url, timeout=10) as resp:
-            data = json.loads(resp.read())
+        def _fetch_weather_sync():
+            with urllib.request.urlopen(url, timeout=10) as resp:
+                return json.loads(resp.read())
+        data = await asyncio.to_thread(_fetch_weather_sync)
 
         cur   = data["current"]
         daily = data["daily"]
@@ -1296,16 +1309,16 @@ async def get_weather(lat: float, lon: float):
 
 @app.get("/api/data")
 async def get_data():
-    data = _read_json(BRIEFING_FILE, {"status": "loading"})
+    data = await asyncio.to_thread(_read_json, BRIEFING_FILE, {"status": "loading"})
     return JSONResponse(data)
 
 
 @app.get("/api/checkin-status")
 async def get_checkin_status():
     today      = datetime.now().date().isoformat()
-    log        = _read_json(DAILY_LOG_FILE, [])
+    log        = await asyncio.to_thread(_read_json, DAILY_LOG_FILE, [])
     done       = any(e.get("date") == today for e in log)
-    patterns   = _read_json(PATTERNS_FILE, {})
+    patterns   = await asyncio.to_thread(_read_json, PATTERNS_FILE, {})
 
     # Derive which questions Goose already knows the answer to with confidence.
     # A field is "settled" if the last 7 entries all gave the same answer.
@@ -1334,12 +1347,12 @@ async def post_checkin(request: Request):
 
     weather_snap = None
     try:
-        w = fetch_weather()
+        w = await asyncio.to_thread(fetch_weather)
         weather_snap = {"temp_f": w["temp_f"], "condition": w["condition"]}
     except Exception:
         pass
 
-    log = _read_json(DAILY_LOG_FILE, [])
+    log = await asyncio.to_thread(_read_json, DAILY_LOG_FILE, [])
     log = [e for e in log if e.get("date") != today]   # remove duplicate if re-submitted
     log.append({
         "date":         today,
@@ -1351,14 +1364,14 @@ async def post_checkin(request: Request):
         "weather":      weather_snap,
         "logged_at":    datetime.now(timezone.utc).isoformat(),
     })
-    _write_json(DAILY_LOG_FILE, log)
+    await asyncio.to_thread(_write_json, DAILY_LOG_FILE, log)
     return JSONResponse({"status": "ok", "total_entries": len(log)})
 
 
 @app.post("/api/feedback")
 async def post_feedback(request: Request):
     body     = await request.json()
-    patterns = _read_json(PATTERNS_FILE, {})
+    patterns = await asyncio.to_thread(_read_json, PATTERNS_FILE, {})
     feedback = patterns.get("feedback_log", [])
     feedback.append({
         "date":            datetime.now().date().isoformat(),
@@ -1370,19 +1383,19 @@ async def post_feedback(request: Request):
         "logged_at":       datetime.now(timezone.utc).isoformat(),
     })
     patterns["feedback_log"] = feedback
-    _write_json(PATTERNS_FILE, patterns)
+    await asyncio.to_thread(_write_json, PATTERNS_FILE, patterns)
     return JSONResponse({"status": "ok"})
 
 
 @app.get("/api/patterns")
 async def get_patterns():
-    return JSONResponse(_read_json(PATTERNS_FILE, {}))
+    return JSONResponse(await asyncio.to_thread(_read_json, PATTERNS_FILE, {}))
 
 
 @app.get("/api/flights")
 async def get_flights(lat: float = WEATHER_LAT, lon: float = WEATHER_LON):
     """Return airborne aircraft near the given coordinates, with 30-second server-side cache."""
-    cache     = _read_json(FLIGHTS_CACHE_FILE, {})
+    cache     = await asyncio.to_thread(_read_json, FLIGHTS_CACHE_FILE, {})
     cache_age = time.time() - cache.get("fetched_at", 0)
     clat, clon = round(lat, 2), round(lon, 2)
 
@@ -1397,9 +1410,11 @@ async def get_flights(lat: float = WEATHER_LAT, lon: float = WEATHER_LON):
     aircraft: list[dict] = []
     try:
         url = f"{OPENSKY_URL}?lamin={lamin}&lomin={lomin}&lamax={lamax}&lomax={lomax}"
-        req = urllib.request.Request(url, headers={"User-Agent": "Goose/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
+        def _fetch_flights_sync():
+            req = urllib.request.Request(url, headers={"User-Agent": "Goose/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return json.loads(resp.read())
+        data = await asyncio.to_thread(_fetch_flights_sync)
 
         for sv in (data.get("states") or []):
             # sv indices: 0=icao, 1=callsign, 5=lon, 6=lat,
@@ -1436,14 +1451,14 @@ async def get_flights(lat: float = WEATHER_LAT, lon: float = WEATHER_LON):
         "box_deg":    FLIGHTS_BOX_DEG,
         "fetched_at": time.time(),
     }
-    _write_json(FLIGHTS_CACHE_FILE, result)
+    await asyncio.to_thread(_write_json, FLIGHTS_CACHE_FILE, result)
     return JSONResponse(result)
 
 
 @app.get("/api/groupme")
 async def get_groupme():
     """Return latest GroupMe summary, detected events, and poll metadata."""
-    data = _read_json(GROUPME_STATE_FILE, {"summary": None, "events": [], "last_check": None})
+    data = await asyncio.to_thread(_read_json, GROUPME_STATE_FILE, {"summary": None, "events": [], "last_check": None})
     return JSONResponse(data)
 
 
@@ -1463,19 +1478,19 @@ async def chat(request: Request):
     briefing: dict = {}
     if BRIEFING_FILE.exists():
         try:
-            briefing = json.loads(BRIEFING_FILE.read_text())
+            briefing = json.loads(await asyncio.to_thread(BRIEFING_FILE.read_text))
         except Exception:
             pass
 
     groupme: dict = {}
     if GROUPME_STATE_FILE.exists():
         try:
-            groupme = json.loads(GROUPME_STATE_FILE.read_text())
+            groupme = json.loads(await asyncio.to_thread(GROUPME_STATE_FILE.read_text))
         except Exception:
             pass
 
-    patterns: dict = _read_json(PATTERNS_FILE, {})
-    context:  dict = _read_json(CONTEXT_FILE,  {})
+    patterns: dict = await asyncio.to_thread(_read_json, PATTERNS_FILE, {})
+    context:  dict = await asyncio.to_thread(_read_json, CONTEXT_FILE,  {})
 
     local_now = datetime.now().strftime("%A, %B %d, %Y %I:%M %p")
 
@@ -1542,7 +1557,7 @@ async def spotify_auth():
 async def spotify_callback(code: str = "", error: str = ""):
     """Exchange the auth code for access + refresh tokens."""
     if error or not code:
-        return HTMLResponse(f"<h2>Spotify auth failed: {error}</h2>")
+        return HTMLResponse(f"<h2>Spotify auth failed: {html.escape(error)}</h2>")
 
     creds_b64 = base64.b64encode(
         f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}".encode()
@@ -1561,10 +1576,12 @@ async def spotify_callback(code: str = "", error: str = ""):
             },
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
+        def _exchange_token_sync():
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return json.loads(resp.read())
+        data = await asyncio.to_thread(_exchange_token_sync)
 
-        _write_json(SPOTIFY_TOKEN_FILE, {
+        await asyncio.to_thread(_write_json, SPOTIFY_TOKEN_FILE, {
             "access_token":  data["access_token"],
             "refresh_token": data["refresh_token"],
             "expires_at":    time.time() + data["expires_in"],
@@ -1583,7 +1600,7 @@ async def spotify_callback(code: str = "", error: str = ""):
 @app.get("/api/spotify")
 async def get_spotify():
     """Return current Spotify playback state (5-second server-side cache)."""
-    return JSONResponse(fetch_now_playing())
+    return JSONResponse(await asyncio.to_thread(fetch_now_playing))
 
 
 @app.post("/api/spotify/control")
@@ -1593,18 +1610,18 @@ async def spotify_control(request: Request):
     action = body.get("action", "")
 
     if action == "play_pause":
-        state = fetch_now_playing()
+        state = await asyncio.to_thread(fetch_now_playing)
         if state.get("status") == "playing":
-            ok = _spotify_put_post("PUT", "/me/player/pause")
+            ok = await asyncio.to_thread(_spotify_put_post, "PUT", "/me/player/pause")
         else:
-            ok = _spotify_put_post("PUT", "/me/player/play")
+            ok = await asyncio.to_thread(_spotify_put_post, "PUT", "/me/player/play")
     elif action == "next":
-        ok = _spotify_put_post("POST", "/me/player/next")
+        ok = await asyncio.to_thread(_spotify_put_post, "POST", "/me/player/next")
     elif action == "prev":
-        ok = _spotify_put_post("POST", "/me/player/previous")
+        ok = await asyncio.to_thread(_spotify_put_post, "POST", "/me/player/previous")
     else:
         return JSONResponse({"error": "unknown action"}, status_code=400)
 
     # Slight delay so Spotify's state updates before the next poll
     await asyncio.sleep(0.4)
-    return JSONResponse({"ok": ok, "now": fetch_now_playing()})
+    return JSONResponse({"ok": ok, "now": await asyncio.to_thread(fetch_now_playing)})
