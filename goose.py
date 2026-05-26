@@ -1058,9 +1058,13 @@ def _sync_static() -> None:
         if not src.exists():
             continue
         try:
-            # Ask iCloud to download the file if it's been evicted (dataless)
-            subprocess.run(["brctl", "download", str(src)],
-                    capture_output=True, timeout=30)
+            # Ask iCloud to download the file if it's been evicted (dataless).
+            # brctl is macOS-only; the call is silently skipped on Linux/Docker.
+            try:
+                subprocess.run(["brctl", "download", str(src)],
+                        capture_output=True, timeout=30)
+            except Exception:
+                pass
             raw = _read_html_file(src)
             fd = os.open(str(dst), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
             try:
