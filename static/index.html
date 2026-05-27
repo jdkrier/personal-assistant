@@ -2030,51 +2030,51 @@
       ctx.fill();
       ctx.restore();
 
-      if (!flightData?.aircraft?.length) return;
-
-      const boxDeg = flightData.box_deg;
-      const clat   = flightData.clat;
-      const clon   = flightData.clon;
-
-      ctx.save();
-      ctx.font      = '8px SF Mono, Fira Code, monospace';
-      ctx.textAlign = 'left';
-
-      for (const ac of flightData.aircraft) {
-        const sx = W / 2 + (ac.lon - clon) / boxDeg * (W * 0.88);
-        const sy = H / 2 - (ac.lat - clat) / boxDeg * (H * 0.88);
-
-        if (sx < -30 || sx > W + 30 || sy < -30 || sy > H + 30) continue;
-
-        const headRad  = (ac.heading - 90) * Math.PI / 180;
-        let angleDiff  = Math.abs(((Math.atan2(sy - cy, sx - cx) - radarSweep) + Math.PI * 3) % (Math.PI * 2) - Math.PI);
-        const pingStr  = Math.max(0, 1 - angleDiff / 0.5);
-        const baseA    = 0.35 + pingStr * 0.55;
+      if (flightData?.aircraft?.length) {
+        const boxDeg = flightData.box_deg;
+        const clat   = flightData.clat;
+        const clon   = flightData.clon;
 
         ctx.save();
-        ctx.translate(sx, sy);
-        ctx.rotate(headRad);
-        ctx.shadowColor = `rgba(0,200,120,${0.3 + pingStr * 0.5})`;
-        ctx.shadowBlur  = 4 + pingStr * 8;
-        ctx.fillStyle   = `rgba(140,220,180,${baseA})`;
-        ctx.beginPath();
-        ctx.moveTo( 5,  0);
-        ctx.lineTo(-3, -2.5);
-        ctx.lineTo(-2,  0);
-        ctx.lineTo(-3,  2.5);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
+        ctx.font      = '8px SF Mono, Fira Code, monospace';
+        ctx.textAlign = 'left';
 
-        ctx.fillStyle   = `rgba(140,220,180,${baseA * 0.7})`;
-        ctx.shadowColor = 'transparent';
-        ctx.fillText(ac.callsign, sx + 8, sy - 2);
-        if (ac.alt_ft) {
-          ctx.fillStyle = `rgba(140,220,180,${baseA * 0.4})`;
-          ctx.fillText(`FL${Math.round(ac.alt_ft / 100)}`, sx + 8, sy + 9);
+        for (const ac of flightData.aircraft) {
+          const sx = W / 2 + (ac.lon - clon) / boxDeg * (W * 0.88);
+          const sy = H / 2 - (ac.lat - clat) / boxDeg * (H * 0.88);
+
+          if (sx < -30 || sx > W + 30 || sy < -30 || sy > H + 30) continue;
+
+          const headRad  = (ac.heading - 90) * Math.PI / 180;
+          let angleDiff  = Math.abs(((Math.atan2(sy - cy, sx - cx) - radarSweep) + Math.PI * 3) % (Math.PI * 2) - Math.PI);
+          const pingStr  = Math.max(0, 1 - angleDiff / 0.5);
+          const baseA    = 0.35 + pingStr * 0.55;
+
+          ctx.save();
+          ctx.translate(sx, sy);
+          ctx.rotate(headRad);
+          ctx.shadowColor = `rgba(0,200,120,${0.3 + pingStr * 0.5})`;
+          ctx.shadowBlur  = 4 + pingStr * 8;
+          ctx.fillStyle   = `rgba(140,220,180,${baseA})`;
+          ctx.beginPath();
+          ctx.moveTo( 5,  0);
+          ctx.lineTo(-3, -2.5);
+          ctx.lineTo(-2,  0);
+          ctx.lineTo(-3,  2.5);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+
+          ctx.fillStyle   = `rgba(140,220,180,${baseA * 0.7})`;
+          ctx.shadowColor = 'transparent';
+          ctx.fillText(ac.callsign, sx + 8, sy - 2);
+          if (ac.alt_ft) {
+            ctx.fillStyle = `rgba(140,220,180,${baseA * 0.4})`;
+            ctx.fillText(`FL${Math.round(ac.alt_ft / 100)}`, sx + 8, sy + 9);
+          }
         }
+        ctx.restore();
       }
-      ctx.restore();
 
       requestAnimationFrame(drawFrame);
     }
