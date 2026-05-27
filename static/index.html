@@ -1960,13 +1960,10 @@
   }
   // ── END GEOLOCATION WEATHER ────────────────────────────────────────────────
 
-  // ── JET ANIMATION ──────────────────────────────────────────────────────────
+  // ── LIVE FLIGHT RADAR ──────────────────────────────────────────────────────
   (function () {
     const canvas = document.getElementById('jets-canvas');
-    const ctx = canvas.getContext('2d');
-    const DEG = Math.PI / 180;
-    const TRAIL_LIFE = 15000; // ms
-    const MAX_JETS   = 2;
+    const ctx    = canvas.getContext('2d');
 
     function resize() {
       canvas.width  = window.innerWidth;
@@ -1975,238 +1972,10 @@
     resize();
     window.addEventListener('resize', resize, { passive: true });
 
-    // ── normalise angle to (-π, π] ──
-    function normAngle(a) {
-      a = a % (Math.PI * 2);
-      if (a >  Math.PI) a -= Math.PI * 2;
-      if (a < -Math.PI) a += Math.PI * 2;
-      return a;
-    }
-
-    // ── draw the jet silhouette centred at origin, pointing right ──
-    function drawJetShape(ctx) {
-      // fuselage
-      ctx.beginPath();
-      ctx.moveTo( 11,  0);
-      ctx.lineTo(  2, -1.5);
-      ctx.lineTo( -5, -2);
-      ctx.lineTo( -9,  0);
-      ctx.lineTo( -5,  2);
-      ctx.lineTo(  2,  1.5);
-      ctx.closePath();
-      ctx.fill();
-      // left wing
-      ctx.beginPath();
-      ctx.moveTo(  1, -1.5);
-      ctx.lineTo( -2, -10);
-      ctx.lineTo( -6, -10);
-      ctx.lineTo( -5, -2);
-      ctx.closePath();
-      ctx.fill();
-      // right wing
-      ctx.beginPath();
-      ctx.moveTo(  1,  1.5);
-      ctx.lineTo( -2,  10);
-      ctx.lineTo( -6,  10);
-      ctx.lineTo( -5,  2);
-      ctx.closePath();
-      ctx.fill();
-      // upper tail fin
-      ctx.beginPath();
-      ctx.moveTo(-5, -1.5);
-      ctx.lineTo(-8.5, -5);
-      ctx.lineTo(-9,  0);
-      ctx.closePath();
-      ctx.fill();
-      // lower tail fin
-      ctx.beginPath();
-      ctx.moveTo(-5,  1.5);
-      ctx.lineTo(-8.5,  5);
-      ctx.lineTo(-9,  0);
-      ctx.closePath();
-      ctx.fill();
-    }
-
-    // ── Jet class ──
-    class Jet {
-      constructor(now) {
-        const W = canvas.width, H = canvas.height;
-        const edge = Math.floor(Math.random() * 4);
-        const m = 40; // spawn margin off screen
-
-        if (edge === 0) {       // left → right
-          this.x = -m; this.y = H * (0.15 + Math.random() * 0.7);
-          this.heading = normAngle((-20 + Math.random() * 40) * DEG);
-        } else if (edge === 1) { // right → left
-          this.x = W + m; this.y = H * (0.15 + Math.random() * 0.7);
-          this.heading = normAngle((180 + (-20 + Math.random() * 40)) * DEG);
-        } else if (edge === 2) { // top → bottom
-          this.x = W * (0.15 + Math.random() * 0.7); this.y = -m;
-          this.heading = normAngle((90 + (-20 + Math.random() * 40)) * DEG);
-        } else {                  // bottom → top
-          this.x = W * (0.15 + Math.random() * 0.7); this.y = H + m;
-          this.heading = normAngle((-90 + (-20 + Math.random() * 40)) * DEG);
-        }
-
-        this.speed       = 110 + Math.random() * 110; // px / sec
-        // max sustained turn rate: 14–28 deg/sec → sweeping arcs, not tight circles
-        this.maxTurnRate = (14 + Math.random() * 14) * DEG;
-        // continuous angular velocity — starts with a gentle random bank
-        this.turnRate    = (Math.random() - 0.5) * this.maxTurnRate;
-        // target turn rate drifts slowly via random walk
-        this.turnTarget  = (Math.random() - 0.5) * this.maxTurnRate * 2;
-        this.nextDrift   = now + (0.8 + Math.random() * 1.8) * 1000;
-
-        this.trail       = []; // { x, y, t }
-        this.sampleTimer = 0;
-        this.offscreenMs = 0;
-        this.alive       = true;
-      }
-
-      update(dt, now) {
-        // ── continuously drift turnRate toward turnTarget ──
-        const diff = this.turnTarget - this.turnRate;
-        // approach at ~2× maxTurnRate per second so changes feel fluid
-        const step = this.maxTurnRate * 2 * dt;
-        this.turnRate += Math.abs(diff) < step ? diff : Math.sign(diff) * step;
-
-        // ── pick a new turnTarget every 0.8–2.6s for organic variation ──
-        if (now >= this.nextDrift) {
-          this.turnTarget = (Math.random() - 0.5) * this.maxTurnRate * 2;
-          this.nextDrift  = now + (0.8 + Math.random() * 1.8) * 1000;
-        }
-
-        // ── apply continuous banking to heading ──
-        this.heading = normAngle(this.heading + this.turnRate * dt);
-
-        // ── move ──
-        this.x += Math.cos(this.heading) * this.speed * dt;
-        this.y += Math.sin(this.heading) * this.speed * dt;
-
-        // ── sample trail at ~30 pts / sec ──
-        this.sampleTimer += dt;
-        if (this.sampleTimer >= 1 / 30) {
-          this.trail.push({ x: this.x, y: this.y, t: now });
-          this.sampleTimer = 0;
-        }
-
-        // ── prune expired trail points ──
-        const cutoff = now - TRAIL_LIFE;
-        while (this.trail.length && this.trail[0].t < cutoff) this.trail.shift();
-
-        // ── off-screen tracking ──
-        const W = canvas.width, H = canvas.height;
-        const pad = 120;
-        if (this.x < -pad || this.x > W + pad || this.y < -pad || this.y > H + pad) {
-          this.offscreenMs += dt * 1000;
-          if (this.offscreenMs > TRAIL_LIFE + 1000) this.alive = false;
-        } else {
-          this.offscreenMs = 0;
-        }
-      }
-
-      draw(ctx, now) {
-        // ── smoke trail: two-pass continuous line — wide+soft outer layer plus
-        //    narrower inner core, both fading with age like real exhaust ──
-        if (this.trail.length >= 2) {
-          const CHUNK = 6; // small chunks so width tapers smoothly along the trail
-          for (let pass = 0; pass < 2; pass++) {
-            for (let i = 0; i < this.trail.length - 1; i += CHUNK) {
-              const end = Math.min(i + CHUNK, this.trail.length - 1);
-              const midIdx = Math.floor((i + end) / 2);
-              const age = Math.min(1, (now - this.trail[midIdx].t) / TRAIL_LIFE);
-              const fresh = 1 - age; // 1 = just emitted, 0 = fully faded
-
-              let op, lw;
-              if (pass === 0) {
-                // outer haze: wide, very transparent — gives the smoke body
-                op = fresh * fresh * 0.10;
-                lw = 1.5 + fresh * 9; // 10.5 px near jet → 1.5 px at tail
-              } else {
-                // inner core: narrower, slightly denser — gives the wispy centre
-                op = fresh * fresh * 0.22;
-                lw = 0.5 + fresh * 3; // 3.5 px near jet → 0.5 px at tail
-              }
-              if (op < 0.004) continue;
-
-              ctx.beginPath();
-              ctx.moveTo(this.trail[i].x, this.trail[i].y);
-              for (let j = i + 1; j <= end; j++) {
-                ctx.lineTo(this.trail[j].x, this.trail[j].y);
-              }
-              ctx.strokeStyle = `rgba(215,218,222,${op.toFixed(3)})`;
-              ctx.lineWidth   = lw;
-              ctx.lineCap     = 'round';
-              ctx.lineJoin    = 'round';
-              ctx.stroke();
-            }
-          }
-        }
-
-        // ── jet body (only near viewport) — F-14 Tomcat grey ──
-        const W = canvas.width, H = canvas.height;
-        if (this.x > -60 && this.x < W + 60 && this.y > -60 && this.y < H + 60) {
-          ctx.save();
-          ctx.translate(this.x, this.y);
-          ctx.rotate(this.heading);
-          ctx.fillStyle   = '#9aa4ac';
-          ctx.shadowColor = 'rgba(180,190,200,0.45)';
-          ctx.shadowBlur  = 5;
-          drawJetShape(ctx);
-          ctx.restore();
-        }
-      }
-    }
-
-    // ── main loop ──
-    const jets = [];
-    let last    = performance.now();
-
-    // spawn first jet almost immediately
-    let nextSpawn = performance.now() + (1 + Math.random() * 2) * 1000;
-
-    function loop(now) {
-      const dt = Math.min((now - last) / 1000, 0.1);
-      last = now;
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      // spawn
-      const alive = jets.filter(j => j.alive).length;
-      if (now >= nextSpawn && alive < MAX_JETS) {
-        jets.push(new Jet(now));
-        nextSpawn = now + (6 + Math.random() * 8) * 1000;
-      }
-
-      // cull dead jets
-      for (let i = jets.length - 1; i >= 0; i--) {
-        if (!jets[i].alive) jets.splice(i, 1);
-      }
-
-      // update + draw
-      for (const jet of jets) {
-        jet.update(dt, now);
-        jet.draw(ctx, now);
-      }
-
-      // Draw real aircraft underneath the animated jets
-      if (window._radarFrame) window._radarFrame(ctx, canvas);
-
-      requestAnimationFrame(loop);
-    }
-
-    requestAnimationFrame(loop);
-  })();
-  // ── END JET ANIMATION ──────────────────────────────────────────────────────
-</script>
-
-<script>
-  // ── LIVE FLIGHT RADAR ──────────────────────────────────────────────────────
-  (function () {
     let flightData  = null;
     let userLat     = 33.4255;   // fallback: ASU Tempe
     let userLon     = -111.9400;
-    let radarSweep  = 0;         // sweep angle in radians
+    let radarSweep  = 0;
 
     // IP-geolocation fallback (works over HTTP when browser geolocation is blocked)
     async function getLocationFallback() {
@@ -2218,7 +1987,6 @@
       fetchFlights();
     }
 
-    // Use geolocation if available; fall back to IP geolocation
     if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
         pos => { userLat = pos.coords.latitude; userLon = pos.coords.longitude; fetchFlights(); },
@@ -2237,14 +2005,12 @@
     }
     setInterval(fetchFlights, 30_000);
 
-    // Expose draw function to the jet animation loop
-    window._radarFrame = function (ctx, canvas) {
+    function drawFrame() {
       const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
 
-      // Advance sweep
+      // Radar sweep
       radarSweep = (radarSweep + 0.008) % (Math.PI * 2);
-
-      // Radar sweep line — subtle green, originates from screen centre
       const cx = W / 2, cy = H / 2;
       const sweepLen = Math.max(W, H);
       ctx.save();
@@ -2275,29 +2041,22 @@
       ctx.textAlign = 'left';
 
       for (const ac of flightData.aircraft) {
-        // Map geo → screen (centre = user location)
         const sx = W / 2 + (ac.lon - clon) / boxDeg * (W * 0.88);
         const sy = H / 2 - (ac.lat - clat) / boxDeg * (H * 0.88);
 
         if (sx < -30 || sx > W + 30 || sy < -30 || sy > H + 30) continue;
 
-        // Heading: OpenSky gives degrees clockwise from north → canvas angle
-        const headRad = (ac.heading - 90) * Math.PI / 180;
+        const headRad  = (ac.heading - 90) * Math.PI / 180;
+        let angleDiff  = Math.abs(((Math.atan2(sy - cy, sx - cx) - radarSweep) + Math.PI * 3) % (Math.PI * 2) - Math.PI);
+        const pingStr  = Math.max(0, 1 - angleDiff / 0.5);
+        const baseA    = 0.35 + pingStr * 0.55;
 
-        // Proximity to sweep line → brief "ping" glow
-        let angleDiff = Math.abs(((Math.atan2(sy - cy, sx - cx) - radarSweep) + Math.PI * 3) % (Math.PI * 2) - Math.PI);
-        const pingStr = Math.max(0, 1 - angleDiff / 0.5);
-        const baseA   = 0.35 + pingStr * 0.55;
-
-        // Draw aircraft blip — tiny arrow pointing in heading direction
         ctx.save();
         ctx.translate(sx, sy);
         ctx.rotate(headRad);
-
         ctx.shadowColor = `rgba(0,200,120,${0.3 + pingStr * 0.5})`;
         ctx.shadowBlur  = 4 + pingStr * 8;
         ctx.fillStyle   = `rgba(140,220,180,${baseA})`;
-
         ctx.beginPath();
         ctx.moveTo( 5,  0);
         ctx.lineTo(-3, -2.5);
@@ -2307,20 +2066,20 @@
         ctx.fill();
         ctx.restore();
 
-        // Callsign
-        ctx.fillStyle = `rgba(140,220,180,${baseA * 0.7})`;
+        ctx.fillStyle   = `rgba(140,220,180,${baseA * 0.7})`;
         ctx.shadowColor = 'transparent';
         ctx.fillText(ac.callsign, sx + 8, sy - 2);
-
-        // Altitude (hundreds of feet, e.g. "FL320" style)
         if (ac.alt_ft) {
           ctx.fillStyle = `rgba(140,220,180,${baseA * 0.4})`;
-          const fl = Math.round(ac.alt_ft / 100);
-          ctx.fillText(`FL${fl}`, sx + 8, sy + 9);
+          ctx.fillText(`FL${Math.round(ac.alt_ft / 100)}`, sx + 8, sy + 9);
         }
       }
       ctx.restore();
-    };
+
+      requestAnimationFrame(drawFrame);
+    }
+
+    requestAnimationFrame(drawFrame);
   })();
   // ── END FLIGHT RADAR ───────────────────────────────────────────────────────
 </script>
