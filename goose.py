@@ -757,7 +757,7 @@ def analyze_gmail_messages(messages: list[dict]) -> dict:
     block = "\n".join(email_lines)
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    prompt = f"""You are scanning emails to find events, meetings, or appointments that should be added to a calendar.
+    prompt = f"""You are scanning emails to find personal events, meetings, or appointments that should be added to a calendar.
 Today is {today}.
 
 Emails to analyze:
@@ -777,13 +777,29 @@ Respond with ONLY valid JSON:
   ]
 }}
 
-Rules:
-- ONLY include events with a specific date (networking events, meetings, appointments, sessions, etc.)
-- Ignore newsletters, promotions, and announcements with no specific upcoming date
-- Resolve relative dates like "this Thursday" relative to today ({today})
-- Omit "time" if no time is mentioned
-- Use 24-hour time (HH:MM)
-- Empty array if no events found"""
+STRICT inclusion rules — only add an event if ALL of these are true:
+1. The recipient is personally expected to attend (invited, enrolled, registered, or scheduled)
+2. It is NOT a marketing/promotional email advertising something to buy (tickets, courses, subscriptions)
+3. It is NOT a mass newsletter blast sent to a mailing list
+4. It has a specific date
+
+EXCLUDE (do not add):
+- Concert/festival advertisements and ticket promotions
+- Online course or webinar advertisements (unless the user is already enrolled/registered)
+- Promotional emails from retailers, apps, or brands
+- Newsletters with dates that are just content — not personal invitations
+- Any email where the primary intent is to sell something
+
+INCLUDE (add these):
+- Meeting invitations from real people or organizations
+- Cohort kick-offs, onboarding sessions, interviews you've signed up for
+- Appointments or confirmed bookings
+- Events from programs the user is actively enrolled in (networking programs, mentorship, etc.)
+
+Resolve relative dates like "this Thursday" relative to today ({today}).
+Omit "time" if no specific time is mentioned.
+Use 24-hour time (HH:MM).
+Empty array if no qualifying events found."""
 
     message = client.messages.create(
         model="claude-haiku-4-5-20251001",
