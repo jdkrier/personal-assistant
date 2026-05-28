@@ -1642,13 +1642,13 @@
           </div>`;
         }).join('');
 
-    // Events
+    // Events (today + upcoming 7 days)
     const evts = data.events || [];
     $('events').innerHTML = evts.length === 0
       ? `<div class="empty">No events scheduled</div>`
       : evts.map(e => `
           <div class="e-row">
-            <div class="e-time">${fmtTime(e.start)}</div>
+            <div class="e-time">${e.is_today ? fmtTime(e.start) : esc(e.date_label || '')}</div>
             <div class="e-title">${esc(e.title)}</div>
           </div>`).join('');
 

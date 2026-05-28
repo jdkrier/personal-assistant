@@ -74,6 +74,9 @@ GROUPME_GROUP_ID     = "30939626"   # "people" — fraternity group chat
 GROUPME_STATE_FILE   = DATA_DIR / "groupme_state.json"
 GROUPME_API_BASE     = "https://api.groupme.com/v3"
 
+# ── Gmail (read-only) ────────────────────────────────────────────────────────
+GMAIL_STATE_FILE = DATA_DIR / "gmail_state.json"
+
 # ── Spotify ──────────────────────────────────────────────────────────────────
 SPOTIFY_CLIENT_ID     = os.environ.get("SPOTIFY_CLIENT_ID", "")
 SPOTIFY_CLIENT_SECRET = os.environ.get("SPOTIFY_CLIENT_SECRET", "")
@@ -216,17 +219,16 @@ def fetch_canvas_assignments() -> list[dict]:
     return sorted(assignments, key=lambda a: a["urgency"], reverse=True)
 
 
-def fetch_calendar_events() -> list[dict]:
+def _get_google_creds() -> "Credentials | None":
+    """Get valid Google credentials, refreshing the token if expired."""
     if not TOKEN_PATH.exists():
-        return []
-
-    try:
-        token_data = _read_token_json()
-        if not token_data:
-            return []
-        creds = Credentials.from_authorized_user_info(token_data)
-
-        if creds.expired and creds.refresh_token:
+        return None
+    token_data = _read_token_json()
+    if not token_data:
+        return None
+    creds = Credentials.from_authorized_user_info(token_data)
+    if creds.expired and creds.refresh_token:
+        try:
             creds.refresh(GoogleAuthRequest())
             raw = creds.to_json().encode()
             fd = os.open(str(TOKEN_PATH), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -234,37 +236,61 @@ def fetch_calendar_events() -> list[dict]:
                 os.write(fd, raw)
             finally:
                 os.close(fd)
+        except Exception as e:
+            _log.warning("_get_google_creds refresh failed: %s", e)
+            return None
+    return creds if creds.valid else None
 
-        if not creds.valid:
-            return []
 
+def fetch_calendar_events() -> list[dict]:
+    """Fetch calendar events for today + the next 7 days."""
+    creds = _get_google_creds()
+    if not creds:
+        return []
+
+    try:
         service = build("calendar", "v3", credentials=creds)
 
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        today_end = today_start + timedelta(days=1)
+        week_end    = today_start + timedelta(days=7)
 
         result = service.events().list(
             calendarId="primary",
             timeMin=today_start.isoformat(),
-            timeMax=today_end.isoformat(),
+            timeMax=week_end.isoformat(),
             singleEvents=True,
             orderBy="startTime",
         ).execute()
 
+        today_date = now.date()
         events = []
         for event in result.get("items", []):
             start = event["start"].get("dateTime", event["start"].get("date", ""))
-            end = event["end"].get("dateTime", event["end"].get("date", ""))
+            end   = event["end"].get("dateTime", event["end"].get("date", ""))
+
+            # Determine if this is today or upcoming
+            try:
+                if "T" in start:
+                    event_date = datetime.fromisoformat(start).date()
+                else:
+                    event_date = datetime.fromisoformat(start).date()
+            except Exception:
+                event_date = today_date
+
+            is_today = (event_date == today_date)
             events.append({
-                "title": event.get("summary", "Busy"),
-                "start": start,
-                "end": end,
+                "title":    event.get("summary", "Busy"),
+                "start":    start,
+                "end":      end,
+                "is_today": is_today,
+                "date_label": "Today" if is_today else event_date.strftime("%a %b %-d"),
             })
 
         return events
 
-    except Exception:
+    except Exception as e:
+        _log.warning("fetch_calendar_events failed: %s", e)
         return []
 
 
@@ -588,6 +614,243 @@ def add_groupme_events_to_calendar(events: list[dict]) -> list[str]:
         _log.warning("GroupMe: calendar auth failed: %s", e)
 
     return added
+
+
+def _gmail_read_state() -> dict:
+    return _read_json(GMAIL_STATE_FILE, {
+        "last_check": None,
+        "processed_ids": [],
+        "events": [],
+        "events_added_to_calendar": [],
+    })
+
+
+def _gmail_write_state(state: dict) -> None:
+    _write_json(GMAIL_STATE_FILE, state)
+
+
+def add_events_to_calendar(events: list[dict], source: str = "Email") -> list[str]:
+    """Add detected events to Google Calendar. Returns titles of added events."""
+    if not events:
+        return []
+
+    creds = _get_google_creds()
+    if not creds:
+        return []
+
+    added: list[str] = []
+    try:
+        service = build("calendar", "v3", credentials=creds)
+
+        for event in events:
+            try:
+                date_str = event.get("date")
+                if not date_str:
+                    continue
+
+                time_str  = event.get("time")
+                duration  = float(event.get("duration_hours", 1))
+                desc      = event.get("description", f"Detected from {source}")
+                if event.get("source"):
+                    desc += f"\nSource: {event['source']}"
+
+                if time_str:
+                    start_dt = datetime.fromisoformat(f"{date_str}T{time_str}:00")
+                    end_dt   = start_dt + timedelta(hours=duration)
+                    body = {
+                        "summary":     event["title"],
+                        "description": desc,
+                        "start": {"dateTime": start_dt.isoformat(), "timeZone": "America/Phoenix"},
+                        "end":   {"dateTime": end_dt.isoformat(),   "timeZone": "America/Phoenix"},
+                    }
+                else:
+                    body = {
+                        "summary":     event["title"],
+                        "description": desc,
+                        "start": {"date": date_str},
+                        "end":   {"date": date_str},
+                    }
+
+                service.events().insert(calendarId="primary", body=body).execute()
+                added.append(event["title"])
+                _log.info("%s: added calendar event '%s'", source, event["title"])
+            except Exception as e:
+                _log.warning("%s: failed to add event '%s': %s", source, event.get("title"), e)
+
+    except Exception as e:
+        _log.warning("add_events_to_calendar auth failed: %s", e)
+
+    return added
+
+
+def fetch_gmail_messages(processed_ids: list[str]) -> list[dict]:
+    """
+    Fetch recent inbox emails not yet processed.
+    Returns list of {id, subject, from, snippet} dicts.
+    Read-only — never sends or modifies anything.
+    """
+    creds = _get_google_creds()
+    if not creds:
+        return []
+
+    try:
+        service = build("gmail", "v1", credentials=creds)
+
+        # Search inbox for the last 3 days, excluding spam/trash
+        cutoff = (datetime.now() - timedelta(days=3)).strftime("%Y/%m/%d")
+        query  = f"in:inbox after:{cutoff} -in:spam -in:trash"
+
+        result = service.users().messages().list(
+            userId="me",
+            q=query,
+            maxResults=50,
+        ).execute()
+
+        messages     = result.get("messages", [])
+        processed_set = set(processed_ids)
+
+        new_messages: list[dict] = []
+        for msg_meta in messages:
+            msg_id = msg_meta["id"]
+            if msg_id in processed_set:
+                continue
+
+            msg = service.users().messages().get(
+                userId="me",
+                id=msg_id,
+                format="metadata",
+                metadataHeaders=["Subject", "From", "Date"],
+            ).execute()
+
+            headers = {
+                h["name"]: h["value"]
+                for h in msg.get("payload", {}).get("headers", [])
+            }
+            new_messages.append({
+                "id":      msg_id,
+                "subject": headers.get("Subject", "(no subject)"),
+                "from":    headers.get("From", ""),
+                "snippet": msg.get("snippet", ""),
+            })
+
+        return new_messages
+
+    except Exception as e:
+        _log.warning("fetch_gmail_messages failed: %s", e)
+        return []
+
+
+def analyze_gmail_messages(messages: list[dict]) -> dict:
+    """Use Claude Haiku to extract calendar events from email subjects + snippets."""
+    if not messages:
+        return {"events": []}
+
+    today = datetime.now().strftime("%A, %B %d, %Y")
+
+    email_lines = []
+    for m in messages[:30]:   # cap at 30 emails for token safety
+        email_lines.append(
+            f"FROM: {m['from']}\n"
+            f"SUBJECT: {m['subject']}\n"
+            f"PREVIEW: {m['snippet']}\n---"
+        )
+    block = "\n".join(email_lines)
+
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    prompt = f"""You are scanning emails to find events, meetings, or appointments that should be added to a calendar.
+Today is {today}.
+
+Emails to analyze:
+{block}
+
+Respond with ONLY valid JSON:
+{{
+  "events": [
+    {{
+      "title": "Event name",
+      "date": "YYYY-MM-DD",
+      "time": "HH:MM",
+      "duration_hours": 1,
+      "description": "brief description",
+      "source": "sender or company name"
+    }}
+  ]
+}}
+
+Rules:
+- ONLY include events with a specific date (networking events, meetings, appointments, sessions, etc.)
+- Ignore newsletters, promotions, and announcements with no specific upcoming date
+- Resolve relative dates like "this Thursday" relative to today ({today})
+- Omit "time" if no time is mentioned
+- Use 24-hour time (HH:MM)
+- Empty array if no events found"""
+
+    message = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    return parse_llm_json(message.content[0].text) or {"events": []}
+
+
+def poll_gmail() -> None:
+    """
+    Scan Gmail inbox for event-like emails, extract events with Claude,
+    and add them to Google Calendar. Runs every 30 minutes via APScheduler.
+    Read-only Gmail access — never sends, modifies, or deletes anything.
+    """
+    if not TOKEN_PATH.exists():
+        return
+
+    state         = _gmail_read_state()
+    processed_ids = state.get("processed_ids", [])
+
+    messages = fetch_gmail_messages(processed_ids)
+
+    state["last_check"] = datetime.now(timezone.utc).isoformat()
+
+    if not messages:
+        _gmail_write_state(state)
+        return
+
+    analysis     = analyze_gmail_messages(messages)
+    added_events: list[str] = []
+    if analysis.get("events"):
+        added_events = add_events_to_calendar(analysis["events"], source="Gmail")
+
+    # Cap processed_ids at 500 to avoid unbounded growth
+    new_ids   = [m["id"] for m in messages]
+    all_ids   = processed_ids + new_ids
+    state["processed_ids"] = all_ids[-500:]
+
+    # Merge detected events, prune anything more than 7 days old
+    today  = datetime.now().date()
+    cutoff = today - timedelta(days=7)
+
+    existing = {(e.get("title", ""), e.get("date", "")): e for e in state.get("events", [])}
+    for e in analysis.get("events", []):
+        existing[(e.get("title", ""), e.get("date", ""))] = e
+
+    def _keep(e: dict) -> bool:
+        ds = e.get("date")
+        if not ds:
+            return True
+        try:
+            return datetime.fromisoformat(ds).date() >= cutoff
+        except Exception:
+            return True
+
+    state["events"] = [e for e in existing.values() if _keep(e)]
+    state["events_added_to_calendar"] = list(set(
+        state.get("events_added_to_calendar", []) + added_events
+    ))
+
+    _gmail_write_state(state)
+    _log.info(
+        "Gmail: %d new emails scanned, %d events detected, %d added to calendar",
+        len(messages), len(analysis.get("events", [])), len(added_events),
+    )
 
 
 def fetch_groupme_pinned() -> list[dict]:
@@ -1359,6 +1622,11 @@ async def lifespan(app: FastAPI):
         next_run_time=datetime.now() + _startup_delay,
     )
     scheduler.add_job(
+        poll_gmail,
+        IntervalTrigger(minutes=30),
+        next_run_time=datetime.now() + _startup_delay,
+    )
+    scheduler.add_job(
         analyze_patterns,
         IntervalTrigger(days=1),
     )
@@ -1817,6 +2085,26 @@ async def groupme_refresh():
     t = threading.Thread(target=poll_groupme, daemon=True)
     t.start()
     return JSONResponse({"ok": True, "message": "GroupMe poll started"})
+
+
+@app.get("/api/gmail")
+async def get_gmail():
+    """Return latest Gmail scan state — detected events and last check time."""
+    data = await asyncio.to_thread(
+        _read_json, GMAIL_STATE_FILE,
+        {"events": [], "events_added_to_calendar": [], "last_check": None}
+    )
+    # Don't expose processed_ids to the frontend — strip it
+    safe = {k: v for k, v in data.items() if k != "processed_ids"}
+    return JSONResponse(safe)
+
+
+@app.post("/api/gmail/refresh")
+async def gmail_refresh():
+    """Trigger an immediate Gmail scan in a background thread."""
+    t = threading.Thread(target=poll_gmail, daemon=True)
+    t.start()
+    return JSONResponse({"ok": True, "message": "Gmail scan started"})
 
 
 @app.post("/api/chat")
