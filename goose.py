@@ -77,6 +77,10 @@ GROUPME_API_BASE     = "https://api.groupme.com/v3"
 # ── Gmail (read-only) ────────────────────────────────────────────────────────
 GMAIL_STATE_FILE = DATA_DIR / "gmail_state.json"
 
+# ── Gym + Weekly Score ───────────────────────────────────────────────────────
+GYM_STATE_FILE   = DATA_DIR / "gym_state.json"
+LINKEDIN_GOAL    = 500   # target connection count
+
 # ── Spotify ──────────────────────────────────────────────────────────────────
 SPOTIFY_CLIENT_ID     = os.environ.get("SPOTIFY_CLIENT_ID", "")
 SPOTIFY_CLIENT_SECRET = os.environ.get("SPOTIFY_CLIENT_SECRET", "")
@@ -456,6 +460,30 @@ def generate_headline(
         if blockers:
             weekly_line += f"\nAnticipated blockers: {', '.join(blockers)}"
 
+    # Weekly progress score — tells Goose how the week is going
+    score_line = ""
+    try:
+        score = compute_weekly_score()
+        gym   = score.get("gym", {})
+        li    = score.get("linkedin", {})
+        parts = []
+        if gym.get("sessions") is not None:
+            gained_str = f"+{li['gained']} this week" if li.get("gained") else ""
+            parts.append(
+                f"Gym: {gym['sessions']}/{gym['target']} sessions this week "
+                f"(next workout: {gym['next_workout']})"
+            )
+        if li.get("current") is not None:
+            li_str = f"{li['current']}/{li.get('goal', 500)} LinkedIn connections"
+            if li.get("gained"):
+                li_str += f" (+{li['gained']} this week)"
+            parts.append(li_str)
+        if parts:
+            score_line = "\n\nWeekly progress (factor into your recommendation if relevant):\n" + \
+                         "\n".join(f"- {p}" for p in parts)
+    except Exception:
+        pass
+
     prompt = f"""You are Goose, a personal co-pilot. Generate a scheduling recommendation based on today's data.
 
 Top assignments (most urgent first):
@@ -463,7 +491,7 @@ Top assignments (most urgent first):
 
 Free time blocks today:
 {json.dumps(free_blocks, indent=2)}
-{weather_line}{context_line}{patterns_line}{events_line}{groupme_line}{weekly_line}
+{weather_line}{context_line}{patterns_line}{events_line}{groupme_line}{weekly_line}{score_line}
 
 Respond with ONLY valid JSON, no other text:
 {{
@@ -1185,6 +1213,57 @@ def _week_start() -> str:
     return (today - timedelta(days=today.weekday())).isoformat()
 
 
+_GYM_CYCLE = ["Chest/Tri", "Back/Bi", "Legs", "Cardio"]
+
+
+def compute_weekly_score() -> dict:
+    """
+    Compute the current week's progress: gym sessions, LinkedIn count, next workout.
+    Reads only local GYM_STATE_FILE — no external HTTP calls.
+    Resets weekly counters automatically on Monday.
+    """
+    week_of   = _week_start()
+    gym_state = _read_json(GYM_STATE_FILE, {})
+
+    # Reset weekly counters when the week rolls over
+    if gym_state.get("week_of") != week_of:
+        gym_state["week_of"]              = week_of
+        gym_state["sessions_this_week"]   = 0
+        # Snapshot LinkedIn count at week start for delta tracking
+        gym_state["linkedin_week_start"]  = gym_state.get("linkedin_current")
+        _write_json(GYM_STATE_FILE, gym_state)
+
+    cycle        = gym_state.get("cycle", _GYM_CYCLE)
+    cycle_pos    = gym_state.get("cycle_position", 0)
+    next_workout = cycle[cycle_pos % len(cycle)]
+    sessions     = gym_state.get("sessions_this_week", 0)
+    target       = gym_state.get("weekly_target", 3)
+    last_date    = gym_state.get("last_session_date")
+    last_workout = gym_state.get("last_workout")
+
+    linkedin_current    = gym_state.get("linkedin_current")
+    linkedin_week_start = gym_state.get("linkedin_week_start")
+    linkedin_gained: int | None = None
+    if linkedin_current is not None and linkedin_week_start is not None:
+        linkedin_gained = linkedin_current - linkedin_week_start
+
+    return {
+        "week_of": week_of,
+        "gym": {
+            "sessions":     sessions,
+            "target":       target,
+            "next_workout": next_workout,
+            "last_date":    last_date,
+            "last_workout": last_workout,
+        },
+        "linkedin": {
+            "current":  linkedin_current,
+            "gained":   linkedin_gained,
+            "goal":     LINKEDIN_GOAL,
+        },
+    }
+
+
 def check_weekly_triggers() -> None:
     """
     Hourly job: set weekly banner state.
@@ -1554,6 +1633,7 @@ def fetch_and_write_briefing() -> None:
         groupme_state     = _read_json(GROUPME_STATE_FILE, {})
         groupme_summary   = groupme_state.get("summary")
         weekly_plan       = _read_json(WEEKLY_PLAN_FILE, {})
+        weekly_score      = compute_weekly_score()
         headline          = generate_headline(
             assignments, free_blocks, weather, patterns,
             events=events,
@@ -1571,6 +1651,7 @@ def fetch_and_write_briefing() -> None:
             "free_blocks": free_blocks,
             "weather": weather,
             "schedule_alert": schedule_alert,
+            "weekly_score": weekly_score,
         }
     except Exception as e:
         briefing = {
@@ -1935,6 +2016,57 @@ async def post_checkin(request: Request):
     log.append(entry)
     await asyncio.to_thread(_write_json, DAILY_LOG_FILE, log)
 
+    # ── Gym session tracking ───────────────────────────────────────────────
+    if body.get("gym_session") is not None:
+        gym_val = body["gym_session"]
+        # Accept bool or string "true"/"false"
+        did_gym = gym_val if isinstance(gym_val, bool) else str(gym_val).lower() in ("true", "yes", "1")
+        workout_type: str | None = body.get("gym_workout") if did_gym else None
+
+        def _update_gym():
+            week_of   = _week_start()
+            gs        = _read_json(GYM_STATE_FILE, {})
+            if gs.get("week_of") != week_of:
+                gs["week_of"]             = week_of
+                gs["sessions_this_week"]  = 0
+                gs["linkedin_week_start"] = gs.get("linkedin_current")
+            if "weekly_target" not in gs:
+                gs["weekly_target"] = 3
+            if "cycle" not in gs:
+                gs["cycle"] = _GYM_CYCLE[:]
+            if did_gym:
+                gs["last_session_date"]  = today
+                gs["sessions_this_week"] = gs.get("sessions_this_week", 0) + 1
+                if workout_type:
+                    cycle = gs.get("cycle", _GYM_CYCLE)
+                    gs["cycle_position"] = (gs.get("cycle_position", 0) + 1) % len(cycle)
+                    gs["last_workout"]   = workout_type
+            _write_json(GYM_STATE_FILE, gs)
+
+        await asyncio.to_thread(_update_gym)
+
+    # ── LinkedIn count tracking ────────────────────────────────────────────
+    if body.get("linkedin_count") is not None:
+        try:
+            li_count = int(body["linkedin_count"])
+
+            def _update_linkedin():
+                week_of = _week_start()
+                gs      = _read_json(GYM_STATE_FILE, {})
+                if gs.get("week_of") != week_of:
+                    gs["week_of"]             = week_of
+                    gs["sessions_this_week"]  = 0
+                    gs["linkedin_week_start"] = gs.get("linkedin_current")
+                # Seed week_start on first entry of the week
+                if gs.get("linkedin_week_start") is None:
+                    gs["linkedin_week_start"] = li_count
+                gs["linkedin_current"] = li_count
+                _write_json(GYM_STATE_FILE, gs)
+
+            await asyncio.to_thread(_update_linkedin)
+        except (ValueError, TypeError):
+            pass
+
     # Save prediction accuracy if provided
     if body.get("prediction_accurate") is not None:
         def _save_accuracy():
@@ -1968,6 +2100,24 @@ async def post_feedback(request: Request):
     patterns["feedback_log"] = feedback
     await asyncio.to_thread(_write_json, PATTERNS_FILE, patterns)
     return JSONResponse({"status": "ok"})
+
+
+@app.get("/api/weekly-score")
+async def get_weekly_score():
+    """Return the current week's gym + LinkedIn progress score."""
+    score = await asyncio.to_thread(compute_weekly_score)
+    # Enrich with assignment data from cached briefing (no Canvas API call)
+    briefing     = await asyncio.to_thread(_read_json, BRIEFING_FILE, {})
+    assignments  = briefing.get("assignments", [])
+    due_this_week = [
+        a for a in assignments
+        if a.get("days_until_due") is not None and 0 <= a["days_until_due"] <= 7
+    ]
+    score["assignments"] = {
+        "due_this_week": len(due_this_week),
+        "names": [a.get("name", "")[:50] for a in due_this_week[:3]],
+    }
+    return JSONResponse(score)
 
 
 @app.get("/api/patterns")

@@ -1242,6 +1242,78 @@
     }
     #chat-send:hover { background: rgba(0,212,255,0.12); }
     #chat-send:disabled { opacity: 0.3; cursor: default; }
+
+    /* ── Weekly Score Strip ─────────────────────────────────────────────── */
+    #week-score-strip {
+      border: 1px solid var(--border);
+      padding: 18px 22px 16px;
+      margin-bottom: 18px;
+      position: relative;
+      background: rgba(0,212,255,0.02);
+    }
+    #week-score-strip::before { content:''; position:absolute; top:-1px; left:-1px; width:12px; height:12px; border-top:2px solid var(--cyan-dim); border-left:2px solid var(--cyan-dim); }
+    #week-score-strip::after  { content:''; position:absolute; bottom:-1px; right:-1px; width:12px; height:12px; border-bottom:2px solid var(--cyan-dim); border-right:2px solid var(--cyan-dim); }
+    .ws-eyebrow {
+      font-family: var(--mono);
+      font-size: 9px;
+      letter-spacing: 0.22em;
+      color: var(--cyan-dim);
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+    .ws-stats {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+    }
+    .ws-stat {
+      flex: 1;
+      padding: 0 18px;
+    }
+    .ws-stat:first-child { padding-left: 0; }
+    .ws-stat:last-child  { padding-right: 0; }
+    .ws-divider {
+      width: 1px;
+      background: var(--border);
+      align-self: stretch;
+    }
+    .ws-label {
+      font-family: var(--mono);
+      font-size: 9px;
+      letter-spacing: 0.18em;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+    .ws-val {
+      font-family: var(--mono);
+      font-size: 20px;
+      color: var(--text);
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .ws-val.on-track { color: var(--green); }
+    .ws-val.behind   { color: var(--amber); }
+    .ws-sub {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-dim);
+      letter-spacing: 0.04em;
+    }
+    .ws-bar {
+      height: 2px;
+      background: var(--border);
+      margin-top: 6px;
+      position: relative;
+      overflow: hidden;
+    }
+    .ws-bar-fill {
+      position: absolute;
+      top: 0; left: 0;
+      height: 100%;
+      background: var(--cyan-dim);
+      transition: width 0.6s ease;
+    }
   </style>
 </head>
 <body>
@@ -1385,6 +1457,39 @@
         </div>
       </div>
 
+      <!-- Gym session -->
+      <div class="checkin-q">
+        <div class="checkin-q-label">Hit the gym today?</div>
+        <div class="chip-row">
+          <button class="chip" data-q="gym_session" data-v="true">Yes</button>
+          <button class="chip" data-q="gym_session" data-v="false">No / rest day</button>
+        </div>
+      </div>
+
+      <div class="checkin-q" id="q-gym-type" style="display:none">
+        <div class="checkin-q-label">What did you work?</div>
+        <div class="chip-row">
+          <button class="chip" data-q="gym_workout" data-v="Chest/Tri">Chest/Tri</button>
+          <button class="chip" data-q="gym_workout" data-v="Back/Bi">Back/Bi</button>
+          <button class="chip" data-q="gym_workout" data-v="Legs">Legs</button>
+          <button class="chip" data-q="gym_workout" data-v="Cardio">Cardio</button>
+          <button class="chip" data-q="gym_workout" data-v="Other">Other</button>
+        </div>
+      </div>
+
+      <!-- LinkedIn count -->
+      <div class="checkin-q">
+        <div class="checkin-q-label">LinkedIn connections? <span style="color:var(--text-dim);font-size:10px">(current total — optional)</span></div>
+        <input type="number" id="linkedin-count-input" placeholder="e.g. 452" min="0" max="9999"
+          style="background:rgba(200,146,34,0.05);border:1px solid rgba(200,146,34,0.35);
+                 color:#f0e6d0;font-family:'Courier New',monospace;font-size:14px;
+                 padding:8px 12px;outline:none;width:130px;caret-color:#c89222;
+                 transition:border-color .2s;"
+          onfocus="this.style.borderColor='#c89222'"
+          onblur="this.style.borderColor='rgba(200,146,34,0.35)'"
+        >
+      </div>
+
       <!-- Shown only when a prediction exists and hasn't been confirmed yet -->
       <div class="checkin-q" id="q-prediction-accuracy" style="display:none">
         <div class="checkin-q-label">Was Goose's prediction right? <span style="color:var(--text-dim);font-size:10px">(optional)</span></div>
@@ -1415,6 +1520,32 @@
 
 <!-- DATA: Assignments + Schedule + Free Blocks -->
 <section class="section" id="data-section">
+  <!-- Weekly Score Strip -->
+  <div id="week-score-strip" class="reveal" style="display:none; transition-delay:0.0s">
+    <div class="ws-eyebrow">Week Score</div>
+    <div class="ws-stats">
+      <div class="ws-stat">
+        <div class="ws-label">Gym</div>
+        <div class="ws-val" id="ws-gym-val">—</div>
+        <div class="ws-sub" id="ws-gym-sub"></div>
+        <div class="ws-bar"><div class="ws-bar-fill" id="ws-gym-bar" style="width:0%"></div></div>
+      </div>
+      <div class="ws-divider"></div>
+      <div class="ws-stat">
+        <div class="ws-label">LinkedIn</div>
+        <div class="ws-val" id="ws-li-val">—</div>
+        <div class="ws-sub" id="ws-li-sub"></div>
+        <div class="ws-bar"><div class="ws-bar-fill" id="ws-li-bar" style="width:0%"></div></div>
+      </div>
+      <div class="ws-divider"></div>
+      <div class="ws-stat">
+        <div class="ws-label">Assignments</div>
+        <div class="ws-val" id="ws-asgn-val">—</div>
+        <div class="ws-sub" id="ws-asgn-sub"></div>
+      </div>
+    </div>
+  </div>
+
   <div class="section-eyebrow reveal">Daily Intelligence</div>
   <div class="data-grid">
     <div class="panel reveal from-left" style="transition-delay:0.05s">
@@ -1779,15 +1910,32 @@
           $('q-out-time').style.display = v === 'yes' ? 'block' : 'none';
           if (v === 'no') delete answers['out_time'];
         }
+        if (q === 'gym_session') {
+          $('q-gym-type').style.display = v === 'true' ? 'block' : 'none';
+          if (v === 'false') delete answers['gym_workout'];
+        }
         checkSubmitEnabled(phase);
       });
 
       // Submit
       submit.addEventListener('click', async () => {
         submit.disabled = true;
-        const payload = phase === 'morning'
-          ? { plans_today: $('plans-today-input').value.trim() }
-          : { ...answers };
+        let payload;
+        if (phase === 'morning') {
+          payload = { plans_today: $('plans-today-input').value.trim() };
+        } else {
+          payload = { ...answers };
+          // Convert gym_session string to actual boolean
+          if (payload.gym_session !== undefined) {
+            payload.gym_session = payload.gym_session === 'true';
+          }
+          // Include LinkedIn count if entered
+          const liInput = $('linkedin-count-input');
+          if (liInput && liInput.value.trim()) {
+            const count = parseInt(liInput.value.trim(), 10);
+            if (!isNaN(count) && count > 0) payload.linkedin_count = count;
+          }
+        }
         try {
           await fetch('/api/checkin', {
             method: 'POST',
@@ -1798,6 +1946,8 @@
           submit.style.display  = 'none';
           localStorage.setItem(phase === 'morning' ? morningKey : eveningKey, '1');
           setTimeout(collapseCard, 800);
+          // Refresh weekly score after logging
+          setTimeout(() => loadWeeklyScore(), 1200);
         } catch {
           submit.disabled = false;
         }
@@ -1813,6 +1963,90 @@
     });
   })();
   // ── END CHECK-IN ───────────────────────────────────────────────────────────
+
+  // ── WEEKLY SCORE STRIP ─────────────────────────────────────────────────────
+  function loadWeeklyScore() {
+    fetch('/api/weekly-score')
+      .then(r => r.json())
+      .then(s => {
+        const strip = $('week-score-strip');
+        if (!strip) return;
+
+        const gym = s.gym || {};
+        const li  = s.linkedin || {};
+        const asgn = s.assignments || {};
+
+        // ── Gym ──────────────────────────────────────────────────────────
+        const gymSessions = gym.sessions ?? 0;
+        const gymTarget   = gym.target   ?? 3;
+        const gymPct      = Math.min(100, Math.round((gymSessions / gymTarget) * 100));
+        const onTrack     = gymSessions >= gymTarget;
+
+        const gymValEl  = $('ws-gym-val');
+        const gymSubEl  = $('ws-gym-sub');
+        const gymBarEl  = $('ws-gym-bar');
+        if (gymValEl) {
+          gymValEl.textContent = `${gymSessions}/${gymTarget}`;
+          gymValEl.className   = 'ws-val' + (onTrack ? ' on-track' : (gymSessions > 0 ? '' : ' behind'));
+        }
+        if (gymSubEl) {
+          const nextTxt = gym.next_workout ? `Next: ${gym.next_workout}` : '';
+          const lastTxt = gym.last_date    ? `Last: ${gym.last_date}`    : 'Not started yet';
+          gymSubEl.textContent = nextTxt || lastTxt;
+        }
+        if (gymBarEl) gymBarEl.style.width = gymPct + '%';
+
+        // ── LinkedIn ─────────────────────────────────────────────────────
+        const liCurrent = li.current;
+        const liGoal    = li.goal ?? 500;
+        const liValEl   = $('ws-li-val');
+        const liSubEl   = $('ws-li-sub');
+        const liBarEl   = $('ws-li-bar');
+        if (liValEl) {
+          if (liCurrent != null) {
+            liValEl.textContent = liCurrent;
+            liValEl.className   = 'ws-val' + (liCurrent >= liGoal ? ' on-track' : '');
+          } else {
+            liValEl.textContent = '—';
+          }
+        }
+        if (liSubEl) {
+          if (liCurrent != null) {
+            const left    = Math.max(0, liGoal - liCurrent);
+            const gained  = li.gained != null ? ` (+${li.gained} this week)` : '';
+            liSubEl.textContent = `${left} to ${liGoal}${gained}`;
+          } else {
+            liSubEl.textContent = 'Log your count in check-in';
+          }
+        }
+        if (liBarEl && liCurrent != null) {
+          liBarEl.style.width = Math.min(100, Math.round((liCurrent / liGoal) * 100)) + '%';
+        }
+
+        // ── Assignments ──────────────────────────────────────────────────
+        const asgnCount  = asgn.due_this_week ?? 0;
+        const asgnValEl  = $('ws-asgn-val');
+        const asgnSubEl  = $('ws-asgn-sub');
+        if (asgnValEl) {
+          asgnValEl.textContent = asgnCount > 0 ? asgnCount : '0';
+          asgnValEl.className   = 'ws-val' + (asgnCount >= 3 ? ' behind' : asgnCount >= 1 ? '' : ' on-track');
+        }
+        if (asgnSubEl) {
+          if (asgnCount > 0 && asgn.names && asgn.names.length) {
+            asgnSubEl.textContent = 'due this week';
+          } else {
+            asgnSubEl.textContent = 'due this week';
+          }
+        }
+
+        strip.style.display = 'block';
+      })
+      .catch(() => {});
+  }
+
+  // Load on page ready
+  loadWeeklyScore();
+  // ── END WEEKLY SCORE ───────────────────────────────────────────────────────
 
   // ── PREDICTION PANEL ───────────────────────────────────────────────────────
   (async function () {
