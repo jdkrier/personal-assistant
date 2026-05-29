@@ -370,6 +370,9 @@ def generate_headline(
     free_blocks: list[dict],
     weather: dict | None,
     patterns: dict | None = None,
+    events: list[dict] | None = None,
+    groupme_summary: str | None = None,
+    weekly_plan: dict | None = None,
 ) -> dict | None:
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -410,6 +413,49 @@ def generate_headline(
         if parts:
             patterns_line = "\n\nLearned behavioral patterns (use these to personalise the recommendation):\n" + "\n".join(parts)
 
+    # Calendar events — today's meetings are hard constraints on free time
+    events_line = ""
+    today_events = [e for e in (events or []) if e.get("is_today")]
+    upcoming_events = [e for e in (events or []) if not e.get("is_today")]
+    if today_events:
+        def _fmt_event(e: dict) -> str:
+            start = e.get("start", "")
+            if "T" in start:
+                try:
+                    from datetime import datetime as _dt
+                    t = _dt.fromisoformat(start)
+                    start = t.strftime("%-I:%M%p")
+                except Exception:
+                    pass
+            return f"- {e.get('title','?')} at {start}"
+        events_line = "\n\nToday's calendar (these block your free time — do NOT schedule over them):\n"
+        events_line += "\n".join(_fmt_event(e) for e in today_events)
+    if upcoming_events:
+        events_line += "\n\nUpcoming events this week:\n"
+        events_line += "\n".join(
+            f"- {e.get('title','?')} on {e.get('date_label','')}" for e in upcoming_events[:5]
+        )
+
+    # GroupMe — social context and upcoming events
+    groupme_line = ""
+    if groupme_summary:
+        groupme_line = f"\n\nSocial/GroupMe intel (relevant for planning social time):\n{groupme_summary}"
+
+    # Weekly plan — stated goals for the week
+    weekly_line = ""
+    if weekly_plan and weekly_plan.get("goals"):
+        goals = weekly_plan.get("goals", [])
+        blockers = weekly_plan.get("blockers_anticipated", [])
+        sessions = weekly_plan.get("work_sessions_targeted", 0)
+        weekly_line = (
+            f"\n\nThis week's stated goals:\n"
+            + "\n".join(f"- {g}" for g in goals)
+        )
+        if sessions:
+            weekly_line += f"\n- Work sessions targeted: {sessions}"
+        if blockers:
+            weekly_line += f"\nAnticipated blockers: {', '.join(blockers)}"
+
     prompt = f"""You are Goose, a personal co-pilot. Generate a scheduling recommendation based on today's data.
 
 Top assignments (most urgent first):
@@ -417,14 +463,16 @@ Top assignments (most urgent first):
 
 Free time blocks today:
 {json.dumps(free_blocks, indent=2)}
-{weather_line}{context_line}{patterns_line}
+{weather_line}{context_line}{patterns_line}{events_line}{groupme_line}{weekly_line}
 
 Respond with ONLY valid JSON, no other text:
 {{
   "headline": "Do the 320 problem set between 2–4pm. Essay can wait until tonight.",
   "priority_task": "exact assignment name",
   "suggested_block": "2:00pm–4:00pm"
-}}"""
+}}
+
+IMPORTANT: If today has calendar events, your suggested_block must NOT overlap with them."""
 
     message = client.messages.create(
         model="claude-haiku-4-5-20251001",
@@ -1503,7 +1551,15 @@ def fetch_and_write_briefing() -> None:
         free_blocks       = compute_free_blocks(events)
         weather           = fetch_weather()
         patterns          = _read_json(PATTERNS_FILE, {})
-        headline          = generate_headline(assignments, free_blocks, weather, patterns)
+        groupme_state     = _read_json(GROUPME_STATE_FILE, {})
+        groupme_summary   = groupme_state.get("summary")
+        weekly_plan       = _read_json(WEEKLY_PLAN_FILE, {})
+        headline          = generate_headline(
+            assignments, free_blocks, weather, patterns,
+            events=events,
+            groupme_summary=groupme_summary,
+            weekly_plan=weekly_plan if weekly_plan.get("goals") else None,
+        )
         schedule_alert    = detect_schedule_change()
 
         briefing = {
