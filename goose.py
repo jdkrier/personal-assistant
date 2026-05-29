@@ -1990,7 +1990,7 @@ app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # ── Auth middleware ───────────────────────────────────────────────────────────
-_PUBLIC_PATHS = {"/login", "/logout", "/health"}
+_PUBLIC_PATHS = {"/login", "/logout", "/health", "/api/location/event"}
 
 class _AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
