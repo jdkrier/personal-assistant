@@ -81,6 +81,13 @@ GMAIL_STATE_FILE = DATA_DIR / "gmail_state.json"
 GYM_STATE_FILE   = DATA_DIR / "gym_state.json"
 LINKEDIN_GOAL    = 500   # target connection count
 
+# ── Location Tracking (Life360 / IFTTT webhooks) ─────────────────────────────
+LOCATION_LOG_FILE       = DATA_DIR / "location_log.json"
+LOCATION_WEBHOOK_SECRET = os.environ.get("LOCATION_WEBHOOK_SECRET", "")
+VALID_PLACES            = {"home", "work", "gym"}
+VALID_EVENTS            = {"arrive", "depart"}
+GYM_MIN_DWELL           = 20   # minutes — minimum to count a gym visit
+
 # ── Spotify ──────────────────────────────────────────────────────────────────
 SPOTIFY_CLIENT_ID     = os.environ.get("SPOTIFY_CLIENT_ID", "")
 SPOTIFY_CLIENT_SECRET = os.environ.get("SPOTIFY_CLIENT_SECRET", "")
@@ -1264,6 +1271,190 @@ def compute_weekly_score() -> dict:
     }
 
 
+def _location_append(place: str, event: str) -> dict:
+    """
+    Append a location arrival/departure event to today's log.
+    Automatically updates daily_log.json and gym_state.json as side effects.
+    Returns the logged entry dict.
+    """
+    now       = datetime.now(timezone.utc)
+    local_now = now.astimezone()
+    today     = local_now.date().isoformat()
+    t_str     = local_now.strftime("%-I:%M%p").lower()
+    entry     = {"ts": now.isoformat(), "place": place, "event": event}
+
+    # Append to location log (keeps full history keyed by date)
+    loc_log = _read_json(LOCATION_LOG_FILE, {})
+    loc_log.setdefault(today, []).append(entry)
+    _write_json(LOCATION_LOG_FILE, loc_log)
+    today_events = loc_log[today]   # includes the just-written entry
+
+    # ── Side effects: enrich daily_log entry ─────────────────────────────
+    try:
+        daily    = _read_json(DAILY_LOG_FILE, [])
+        existing = next((e for e in daily if e.get("date") == today), None)
+        if existing is None:
+            existing = {"date": today, "day_of_week": local_now.strftime("%A")}
+            daily.append(existing)
+        else:
+            daily = [e for e in daily if e.get("date") != today]
+            daily.append(existing)
+
+        if place == "home" and event == "depart":
+            existing.setdefault("went_out", True)
+            existing.setdefault("first_departure", t_str)
+
+        elif place == "work" and event == "arrive":
+            existing["went_to_work"]   = True
+            existing["work_arrive_at"] = t_str
+
+        elif place == "work" and event == "depart":
+            existing["work_depart_at"] = t_str
+            work_arrives = [e for e in today_events if e["place"] == "work" and e["event"] == "arrive"]
+            if work_arrives:
+                arrive_dt = datetime.fromisoformat(work_arrives[0]["ts"])
+                existing["work_hours"] = round((now - arrive_dt).seconds / 3600, 1)
+
+        elif place == "gym" and event == "depart":
+            gym_arrives = [e for e in today_events if e["place"] == "gym" and e["event"] == "arrive"]
+            gym_departs = [e for e in today_events if e["place"] == "gym" and e["event"] == "depart"]
+            if gym_arrives and gym_departs:
+                arrive_dt = datetime.fromisoformat(gym_arrives[0]["ts"])
+                depart_dt = datetime.fromisoformat(gym_departs[-1]["ts"])
+                dwell_min = (depart_dt - arrive_dt).seconds / 60
+                if dwell_min >= GYM_MIN_DWELL:
+                    existing["gym_session"]  = True
+                    existing["gym_dwell_min"] = round(dwell_min)
+                    # Auto-advance gym cycle (only once per day)
+                    gs = _read_json(GYM_STATE_FILE, {})
+                    week_of = _week_start()
+                    if gs.get("week_of") != week_of:
+                        gs["week_of"]             = week_of
+                        gs["sessions_this_week"]  = 0
+                        gs["linkedin_week_start"] = gs.get("linkedin_current")
+                    if "cycle"        not in gs: gs["cycle"]        = _GYM_CYCLE[:]
+                    if "weekly_target" not in gs: gs["weekly_target"] = 3
+                    if gs.get("last_session_date") != today:
+                        gs["last_session_date"]  = today
+                        gs["sessions_this_week"] = gs.get("sessions_this_week", 0) + 1
+                        gs["cycle_position"]     = (gs.get("cycle_position", 0) + 1) % len(gs["cycle"])
+                        _write_json(GYM_STATE_FILE, gs)
+
+        _write_json(DAILY_LOG_FILE, daily)
+    except Exception as exc:
+        _log.warning("_location_append side-effect failed: %s", exc)
+
+    return entry
+
+
+def infer_day_summary(date_str: str | None = None) -> dict:
+    """
+    Analyse today's location events and return an inferred summary dict:
+      has_data      – bool, whether any events exist
+      summary       – human-readable movement string (e.g. "Work 7am–4pm → Gym 57min")
+      inferred      – dict of pre-filled check-in fields (went_out, went_to_work, gym_session …)
+      gap_question  – natural-language question about an unexplained gap, or None
+      events        – raw sorted event list for today
+    """
+    from datetime import datetime as _dt
+
+    if date_str is None:
+        date_str = datetime.now().date().isoformat()
+
+    log    = _read_json(LOCATION_LOG_FILE, {})
+    events = sorted(log.get(date_str, []), key=lambda e: e["ts"])
+
+    if not events:
+        return {"has_data": False, "date": date_str}
+
+    def _local(ts: str) -> _dt:
+        return _dt.fromisoformat(ts).astimezone()
+
+    def _fmt(ts: str) -> str:
+        return _local(ts).strftime("%-I:%M%p").lower()
+
+    inf: dict = {}
+
+    # ── Home departures ───────────────────────────────────────────────────
+    home_departs = [e for e in events if e["place"] == "home" and e["event"] == "depart"]
+    if home_departs:
+        inf["went_out"]        = True
+        inf["first_departure"] = _fmt(home_departs[0]["ts"])
+
+    # ── Work ──────────────────────────────────────────────────────────────
+    work_arrivals = [e for e in events if e["place"] == "work" and e["event"] == "arrive"]
+    work_departs  = [e for e in events if e["place"] == "work" and e["event"] == "depart"]
+    if work_arrivals:
+        inf["went_to_work"]  = True
+        inf["work_arrive"]   = _fmt(work_arrivals[0]["ts"])
+        if work_departs:
+            inf["work_depart"] = _fmt(work_departs[-1]["ts"])
+            hrs = (_local(work_departs[-1]["ts"]) - _local(work_arrivals[0]["ts"])).seconds / 3600
+            inf["work_hours"]  = round(hrs, 1)
+
+    # ── Gym ───────────────────────────────────────────────────────────────
+    gym_arrivals = [e for e in events if e["place"] == "gym" and e["event"] == "arrive"]
+    gym_departs  = [e for e in events if e["place"] == "gym" and e["event"] == "depart"]
+    if gym_arrivals and gym_departs:
+        dwell = (_local(gym_departs[-1]["ts"]) - _local(gym_arrivals[0]["ts"])).seconds / 60
+        if dwell >= GYM_MIN_DWELL:
+            inf["gym_session"] = True
+            inf["gym_min"]     = round(dwell)
+    elif gym_arrivals:
+        inf["at_gym_now"] = True    # arrived, hasn't left yet
+
+    # ── Gap detection ─────────────────────────────────────────────────────
+    # Find consecutive depart → arrive pairs with unexpectedly large gaps
+    gap_question: str | None = None
+    for i in range(len(events) - 1):
+        e1, e2 = events[i], events[i + 1]
+        if e1["event"] != "depart":
+            continue
+        t1   = _local(e1["ts"])
+        t2   = _local(e2["ts"])
+        mins = (t2 - t1).seconds / 60
+        pair = {e1["place"], e2["place"]}
+        # Ignore normal commute durations
+        if pair == {"home", "work"} and mins < 75:
+            continue
+        if e2["place"] == "gym" and mins < 60:
+            continue
+        if mins > 45:
+            gap_question = (
+                f"You left {e1['place'].title()} at {t1.strftime('%-I:%M%p').lower()} "
+                f"and your next ping was {e2['place'].title()} "
+                f"at {t2.strftime('%-I:%M%p').lower()} — {round(mins)} min gap. "
+                f"What were you up to?"
+            )
+            break
+
+    # ── Human-readable summary ────────────────────────────────────────────
+    parts: list[str] = []
+    if inf.get("went_to_work"):
+        arr  = inf.get("work_arrive", "?")
+        dep  = inf.get("work_depart")
+        hrs  = inf.get("work_hours")
+        line = f"Work {arr}–{dep}" if dep else f"Work from {arr}"
+        if hrs:
+            line += f" ({hrs}h)"
+        parts.append(line)
+    if inf.get("gym_session"):
+        parts.append(f"Gym ({inf['gym_min']}min)")
+    if not parts and inf.get("went_out"):
+        parts.append(f"Out since {inf.get('first_departure', '?')}")
+    if not parts:
+        parts.append("Home all day")
+
+    return {
+        "has_data":    True,
+        "date":        date_str,
+        "inferred":    inf,
+        "gap_question": gap_question,
+        "summary":     " → ".join(parts),
+        "events":      events,
+    }
+
+
 def check_weekly_triggers() -> None:
     """
     Hourly job: set weekly banner state.
@@ -1962,6 +2153,13 @@ async def get_checkin_status():
     has_prediction  = bool(today_pred and today_pred.get("text"))
     pred_confirmed  = bool(today_pred and today_pred.get("accuracy") is not None)
 
+    # Location context — inferred from Life360 events if available
+    location_ctx: dict = {}
+    try:
+        location_ctx = infer_day_summary(today)
+    except Exception:
+        pass
+
     return JSONResponse({
         "done":              done,
         "morning_done":      morning_done,
@@ -1973,6 +2171,7 @@ async def get_checkin_status():
         "has_patterns":      bool(patterns.get("derived")),
         "has_prediction":    has_prediction,
         "pred_confirmed":    pred_confirmed,
+        "location":          location_ctx,
     })
 
 
@@ -2009,7 +2208,7 @@ async def post_checkin(request: Request):
     # Evening fields (all optional — only overwrite if provided)
     for field in ("went_out", "out_time", "work_session", "focus_level",
                   "mood_score", "social_vs_solo", "peak_energy_time",
-                  "biggest_blocker", "actual_focus_window"):
+                  "biggest_blocker", "actual_focus_window", "location_gap_note"):
         if body.get(field) is not None:
             entry[field] = body[field]
 
@@ -2327,6 +2526,64 @@ async def gmail_refresh():
     t = threading.Thread(target=poll_gmail, daemon=True)
     t.start()
     return JSONResponse({"ok": True, "message": "Gmail scan started"})
+
+
+# ── Location Tracking ─────────────────────────────────────────────────────────
+
+@app.post("/api/location/event")
+async def post_location_event(request: Request):
+    """
+    Receive a Life360 arrival/departure event (via IFTTT webhook).
+
+    Auth:  ?token=LOCATION_WEBHOOK_SECRET  (set in .env)
+    Body:  {"place": "home|work|gym", "event": "arrive|depart"}
+
+    Automatically updates daily_log.json and gym_state.json as side effects.
+    Gym sessions are counted when dwell time ≥ 20 min.
+    """
+    if LOCATION_WEBHOOK_SECRET:
+        token = request.query_params.get("token", "")
+        if not hmac.compare_digest(
+            token.encode("utf-8"),
+            LOCATION_WEBHOOK_SECRET.encode("utf-8")
+        ):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+    place = str(body.get("place", "")).lower().strip()
+    event = str(body.get("event", "")).lower().strip()
+
+    if place not in VALID_PLACES:
+        return JSONResponse({"error": f"unknown place '{place}' — use: home, work, gym"}, status_code=400)
+    if event not in VALID_EVENTS:
+        return JSONResponse({"error": f"unknown event '{event}' — use: arrive, depart"}, status_code=400)
+
+    entry = await asyncio.to_thread(_location_append, place, event)
+    _log.info("location: %s %s at %s", event, place, entry["ts"])
+    return JSONResponse({"status": "ok", "logged": entry})
+
+
+@app.get("/api/location/today")
+async def get_location_today():
+    """Return today's inferred location summary (used by check-in to pre-fill questions)."""
+    today   = datetime.now().date().isoformat()
+    summary = await asyncio.to_thread(infer_day_summary, today)
+    return JSONResponse(summary)
+
+
+@app.get("/api/location/log")
+async def get_location_log():
+    """Return the full location event log (last 7 days)."""
+    log   = await asyncio.to_thread(_read_json, LOCATION_LOG_FILE, {})
+    today = datetime.now().date()
+    # Keep only last 7 days
+    cutoff = (today - timedelta(days=7)).isoformat()
+    trimmed = {k: v for k, v in log.items() if k >= cutoff}
+    return JSONResponse(trimmed)
 
 
 @app.post("/api/chat")

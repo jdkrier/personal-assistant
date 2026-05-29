@@ -1378,7 +1378,30 @@
 
     <!-- EVENING PHASE: log the day -->
     <div id="checkin-evening" style="display:none">
-      <div class="checkin-q">
+
+      <!-- Location summary banner (populated by JS when Life360 data exists) -->
+      <div id="location-banner" style="display:none; margin-bottom:16px; padding:10px 14px;
+           border-left:2px solid rgba(0,212,255,0.4); background:rgba(0,212,255,0.04);">
+        <div style="font-family:var(--mono);font-size:9px;letter-spacing:0.2em;
+             color:var(--cyan-dim);text-transform:uppercase;margin-bottom:5px;">📍 Today's movements — auto-logged</div>
+        <div id="location-banner-text" style="font-family:var(--mono);font-size:12px;color:var(--text);"></div>
+      </div>
+
+      <!-- Gap question (only shown when Life360 detects an unexplained stop) -->
+      <div class="checkin-q" id="q-location-gap" style="display:none">
+        <div class="checkin-q-label" id="location-gap-label"></div>
+        <input type="text" id="location-gap-input"
+          placeholder="coffee run, errands, stopped at a friend's…"
+          style="width:100%;background:rgba(200,146,34,0.05);border:1px solid rgba(200,146,34,0.35);
+                 color:#f0e6d0;font-family:'Courier New',monospace;font-size:13px;
+                 padding:8px 12px;outline:none;caret-color:#c89222;
+                 transition:border-color .2s;"
+          onfocus="this.style.borderColor='#c89222'"
+          onblur="this.style.borderColor='rgba(200,146,34,0.35)'"
+        >
+      </div>
+
+      <div class="checkin-q" id="q-went-out">
         <div class="checkin-q-label">Did you go out last night?</div>
         <div class="chip-row" id="chips-out">
           <button class="chip" data-q="went_out" data-v="yes">Yes</button>
@@ -1396,7 +1419,7 @@
         </div>
       </div>
 
-      <div class="checkin-q">
+      <div class="checkin-q" id="q-work-session">
         <div class="checkin-q-label">When did you get work done?</div>
         <div class="chip-row">
           <button class="chip" data-q="work_session" data-v="morning">Morning</button>
@@ -1871,18 +1894,85 @@
         // Evening: show if full log not yet done
         if (s.done || localStorage.getItem(eveningKey)) return;
 
-        $('checkin-title').textContent = '◆ Daily Log — Last Night';
+        $('checkin-title').textContent = '◆ Daily Log';
         $('checkin-evening').style.display = 'block';
         card.classList.add('visible');
+
+        // ── Location context (Life360) ──────────────────────────────────
+        const loc = s.location || {};
+        if (loc.has_data && loc.summary) {
+          // Show the movement summary banner
+          const banner = $('location-banner');
+          const bannerText = $('location-banner-text');
+          if (banner && bannerText) {
+            bannerText.textContent = loc.summary;
+            banner.style.display = 'block';
+          }
+
+          const inf = loc.inferred || {};
+
+          // Auto-fill went_out from location
+          if (inf.went_out !== undefined) {
+            answers.went_out = inf.went_out ? 'yes' : 'no';
+            const qEl = $('q-went-out');
+            if (qEl) {
+              const lbl = qEl.querySelector('.checkin-q-label');
+              qEl.innerHTML = `<div class="checkin-q-label" style="color:var(--text-dim)">
+                ${lbl ? lbl.textContent : 'Went out'} — <span style="color:var(--cyan-dim)">
+                ${inf.went_out ? `Yes, left at ${inf.first_departure || '?'}` : 'No'} (Life360)</span>
+              </div>`;
+            }
+            // Hide out_time question too — location handled it
+            const qtEl = $('q-out-time');
+            if (qtEl) qtEl.style.display = 'none';
+          }
+
+          // Auto-fill work_session from location
+          if (inf.went_to_work) {
+            answers.work_session = 'morning';
+            const qEl = $('q-work-session');
+            if (qEl) {
+              const hrs = inf.work_hours ? ` (${inf.work_hours}h)` : '';
+              qEl.innerHTML = `<div class="checkin-q-label" style="color:var(--text-dim)">
+                Work session — <span style="color:var(--cyan-dim)">
+                ${inf.work_arrive || '?'}–${inf.work_depart || 'ongoing'}${hrs} (Life360)</span>
+              </div>`;
+            }
+          }
+
+          // Auto-fill gym from location
+          if (inf.gym_session) {
+            answers.gym_session = true;
+            const qGym = document.querySelector('[data-q="gym_session"]')?.closest('.checkin-q');
+            if (qGym) {
+              qGym.innerHTML = `<div class="checkin-q-label" style="color:var(--text-dim)">
+                Gym — <span style="color:var(--cyan-dim)">
+                ${inf.gym_min || '?'}min session auto-logged (Life360)</span>
+              </div>`;
+            }
+            $('q-gym-type').style.display = 'none';
+          }
+
+          // Show gap question if there's an unexplained stop
+          if (loc.gap_question) {
+            const gapEl = $('q-location-gap');
+            const gapLbl = $('location-gap-label');
+            if (gapEl && gapLbl) {
+              gapLbl.textContent = loc.gap_question;
+              gapEl.style.display = 'block';
+            }
+          }
+        }
 
         // Show accuracy question if there's an unconfirmed prediction today
         if (s.has_prediction && !s.pred_confirmed) {
           $('q-prediction-accuracy').style.display = 'block';
         }
 
-        // Pre-fill settled fields
+        // Pre-fill settled fields (learned patterns)
         const settled = s.settled || {};
         Object.entries(settled).forEach(([field, val]) => {
+          if (answers[field] !== undefined) return;  // don't override location inference
           answers[field] = val;
           const chip = card.querySelector(`.chip[data-q="${field}"][data-v="${val}"]`);
           if (chip) {
@@ -1934,6 +2024,11 @@
           if (liInput && liInput.value.trim()) {
             const count = parseInt(liInput.value.trim(), 10);
             if (!isNaN(count) && count > 0) payload.linkedin_count = count;
+          }
+          // Include gap note if answered
+          const gapInput = $('location-gap-input');
+          if (gapInput && gapInput.value.trim()) {
+            payload.location_gap_note = gapInput.value.trim();
           }
         }
         try {
