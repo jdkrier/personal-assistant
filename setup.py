@@ -3,10 +3,14 @@
 Run this ONCE before installing the LaunchAgent to authorize Google Calendar + Gmail.
 A browser window will open asking you to sign in and grant access.
 """
+import os
 from pathlib import Path
 
-CREDENTIALS_PATH = "credentials.json"
-TOKEN_PATH = "token.json"
+# Match goose.py: DATA_DIR env var or ~/.goose/data by default
+DATA_DIR         = Path(os.environ.get("DATA_DIR", str(Path.home() / ".goose" / "data")))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+CREDENTIALS_PATH = Path(__file__).parent / "credentials.json"
+TOKEN_PATH       = DATA_DIR / "token.json"
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",           # read + write calendar events
     "https://www.googleapis.com/auth/gmail.readonly",     # read Gmail inbox
@@ -31,10 +35,10 @@ def main():
         print("Old token removed — re-authorizing with expanded scopes.")
 
     print("Opening browser for Google Calendar + Gmail authorization...")
-    flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
+    flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_PATH), SCOPES)
     creds = flow.run_local_server(port=0)
 
-    Path(TOKEN_PATH).write_text(creds.to_json())
+    TOKEN_PATH.write_text(creds.to_json())
     print(f"\nAuthorization complete. Token saved to {TOKEN_PATH}")
     print("Scopes granted:")
     for s in SCOPES:
